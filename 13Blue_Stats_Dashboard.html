@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13 Blue — Volleyball Stats Dashboard 2025-26</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {
+    --navy: #1a3a6b;
+    --gold: #e8a020;
+    --bg: #f4f6fa;
+    --card: #ffffff;
+    --text: #1a1a2e;
+    --good: #2e7d32;
+    --avg: #f9a825;
+    --poor: #c62828;
+    --good-bg: #e8f5e9;
+    --avg-bg: #fffde7;
+    --poor-bg: #ffebee;
+    --neutral: #607d8b;
+    --border: #dde3ed;
+    --shadow: 0 2px 8px rgba(26,58,107,0.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+  /* HEADER */
+  .site-header {
+    background: var(--navy);
+    color: #fff;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  }
+  .site-header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: .5px; }
+  .site-header .season { font-size: .85rem; color: var(--gold); font-weight: 600; }
+  .header-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .toggle-btn {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: .78rem;
+    cursor: pointer;
+    transition: background .2s;
+    white-space: nowrap;
+  }
+  .toggle-btn.active, .toggle-btn:hover { background: var(--gold); color: var(--navy); border-color: var(--gold); }
+
+  /* NAV TABS */
+  .nav-scroll {
+    background: #fff;
+    border-bottom: 2px solid var(--border);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    position: sticky; top: 53px; z-index: 90;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .nav-tabs {
+    display: flex;
+    white-space: nowrap;
+    padding: 0 12px;
+    min-width: max-content;
+  }
+  .tab-btn {
+    padding: 10px 14px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: .82rem;
+    font-weight: 600;
+    color: #666;
+    border-bottom: 3px solid transparent;
+    transition: all .2s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--navy); }
+  .tab-btn.active { color: var(--navy); border-bottom-color: var(--gold); }
+  .tab-btn .role-badge {
+    display: inline-block;
+    font-size: .65rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .role-OH { background: #e3f2fd; color: #1565c0; }
+  .role-MB { background: #fce4ec; color: #c62828; }
+  .role-S  { background: #f3e5f5; color: #6a1b9a; }
+  .role-LDS{ background: #e8f5e9; color: #2e7d32; }
+
+  /* MAIN CONTENT */
+  .main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* CARDS */
+  .cards-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+    border-left: 4px solid var(--navy);
+    position: relative;
+  }
+  .stat-card .card-label { font-size: .75rem; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .5px; }
+  .stat-card .card-value { font-size: 1.8rem; font-weight: 800; color: var(--navy); line-height: 1.1; margin: 4px 0 2px; }
+  .stat-card .card-trend { font-size: .78rem; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+  .stat-card .sparkline-wrap { height: 40px; margin-top: 8px; }
+  .trend-up   { color: var(--good); }
+  .trend-down { color: var(--poor); }
+  .trend-flat { color: var(--neutral); }
+
+  /* SECTION HEADERS */
+  .section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 20px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--gold);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* CHART CARDS */
+  .chart-card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+  }
+  .chart-card h3 { font-size: .9rem; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
+  .chart-wrap { position: relative; width: 100%; }
+  .chart-wrap canvas { max-width: 100%; }
+
+  /* GRID LAYOUTS */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+
+  /* PLAYER HEADER */
+  .player-header {
+    background: var(--navy);
+    color: #fff;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .player-jersey {
+    font-size: 2.5rem;
+    font-weight: 900;
+    color: var(--gold);
+    line-height: 1;
+    min-width: 60px;
+    text-align: center;
+  }
+  .player-info h2 { font-size: 1.3rem; font-weight: 800; }
+  .player-info .role-pill {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 3px 12px;
+    border-radius: 20px;
+    font-size: .75rem;
+    font-weight: 700;
+    background: var(--gold);
+    color: var(--navy);
+  }
+  .player-narrative {
+    margin-left: auto;
+    font-size: .78rem;
+    color: rgba(255,255,255,0.8);
+    max-width: 300px;
+    font-style: italic;
+    line-height: 1.4;
+  }
+
+  /* STATS TABLE */
+  .stats-table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+  th {
+    background: var(--navy);
+    color: #fff;
+    padding: 7px 10px;
+    text-align: center;
+    font-weight: 600;
+    font-size: .72rem;
+    white-space: nowrap;
+  }
+  td {
+    padding: 6px 10px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tr:hover td { background: #f0f4ff; }
+  .td-good  { background: var(--good-bg); color: var(--good); font-weight: 700; }
+  .td-avg   { background: var(--avg-bg); color: #b8860b; font-weight: 600; }
+  .td-poor  { background: var(--poor-bg); color: var(--poor); font-weight: 600; }
+  .td-dnp   { background: #eceff1; color: #90a4ae; font-style: italic; }
+  .td-best  { outline: 2px solid var(--good); outline-offset: -2px; }
+  .td-worst { outline: 2px solid var(--poor); outline-offset: -2px; }
+
+  /* HEAT MAP */
+  .heatmap-table th { font-size: .68rem; padding: 5px 6px; }
+  .heatmap-table td {
+    width: 72px; height: 42px;
+    font-size: .72rem; font-weight: 700;
+    padding: 2px;
+    cursor: pointer;
+    transition: opacity .15s;
+    border: 1px solid #fff;
+  }
+  .heatmap-table td:hover { opacity: .8; outline: 2px solid var(--navy); }
+  .heatmap-table .player-name-cell {
+    text-align: left;
+    font-weight: 700;
+    font-size: .75rem;
+    padding: 6px 10px;
+    white-space: nowrap;
+    background: #fff !important;
+    color: var(--text);
+  }
+
+  /* TOGGLE CONTROLS */
+  .chart-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+  .chart-controls label { display: flex; align-items: center; gap: 5px; font-size: .76rem; font-weight: 600; cursor: pointer; }
+  .chart-controls input[type=checkbox] { accent-color: var(--navy); width: 14px; height: 14px; }
+
+  /* NARRATIVE CALLOUT BOX */
+  .callout {
+    background: linear-gradient(135deg, #e8f0fe 0%, #f3e5f5 100%);
+    border-left: 4px solid var(--navy);
+    border-radius: 0 8px 8px 0;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: .8rem;
+    color: #333;
+    line-height: 1.5;
+  }
+  .callout strong { color: var(--navy); }
+
+  /* MOBILE NAV SELECT */
+  .mobile-nav { display: none; padding: 8px 12px; background: #fff; border-bottom: 1px solid var(--border); }
+  .mobile-nav select { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; }
+  @media (max-width: 640px) {
+    .nav-scroll { display: none; }
+    .mobile-nav { display: block; }
+    .player-narrative { display: none; }
+    .main { padding: 12px; }
+    .stat-card .card-value { font-size: 1.4rem; }
+    .player-jersey { font-size: 2rem; }
+  }
+
+  /* DNP BADGE */
+  .dnp-badge {
+    display: inline-block;
+    background: #eceff1;
+    color: #90a4ae;
+    font-size: .68rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* Single chart full width */
+  .chart-card-solo { display: block; }
+
+  /* FOOTER */
+  .site-footer {
+    text-align: center;
+    color: #999;
+    font-size: .72rem;
+    padding: 16px;
+    margin-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div>
+    <h1>13 Blue — Volleyball Stats Dashboard</h1>
+    <div class="season">Season 2025–26 &nbsp;|&nbsp; 8 Tournaments</div>
+  </div>
+  <div class="header-controls">
+    <button class="toggle-btn active" id="btnPerSet" onclick="toggleNormalize()">Per-Set Normalized</button>
+    <button class="toggle-btn" id="btnRaw" onclick="toggleRaw()">Raw Totals</button>
+  </div>
+</header>
+
+<!-- Mobile nav -->
+<div class="mobile-nav">
+  <select id="mobileSelect" onchange="switchTab(this.value)">
+    <option value="tab-team">Team Overview</option>
+    <option value="tab-26">Ava N. #26 — OH</option>
+    <option value="tab-14">Emma L. #14 — OH</option>
+    <option value="tab-11">Isabella F. #11 — OH</option>
+    <option value="tab-7">Amelia D. #7 — OH</option>
+    <option value="tab-17">Tatiana R. #17 — MB</option>
+    <option value="tab-19">Jenna G. #19 — MB</option>
+    <option value="tab-18">Aarnavi M. #18 — MB</option>
+    <option value="tab-10">Brenna O'C #10 — S</option>
+    <option value="tab-22">Tanisha V. #22 — S</option>
+    <option value="tab-1">Zlata L. #1 — L/DS</option>
+    <option value="tab-4">Emma F. #4 — L/DS</option>
+    <option value="tab-8">Ava S. #8 — L/DS</option>
+    <option value="tab-9">Sophia F. #9 — L/DS</option>
+  </select>
+</div>
+
+<!-- Desktop nav -->
+<nav class="nav-scroll">
+  <div class="nav-tabs">
+    <button class="tab-btn active" data-tab="tab-team" onclick="switchTab('tab-team')">Team Overview</button>
+    <button class="tab-btn" data-tab="tab-26" onclick="switchTab('tab-26')">Ava N. <span class="role-badge role-OH">#26 OH</span></button>
+    <button class="tab-btn" data-tab="tab-14" onclick="switchTab('tab-14')">Emma L. <span class="role-badge role-OH">#14 OH</span></button>
+    <button class="tab-btn" data-tab="tab-11" onclick="switchTab('tab-11')">Isabella F. <span class="role-badge role-OH">#11 OH</span></button>
+    <button class="tab-btn" data-tab="tab-7" onclick="switchTab('tab-7')">Amelia D. <span class="role-badge role-OH">#7 OH</span></button>
+    <button class="tab-btn" data-tab="tab-17" onclick="switchTab('tab-17')">Tatiana R. <span class="role-badge role-MB">#17 MB</span></button>
+    <button class="tab-btn" data-tab="tab-19" onclick="switchTab('tab-19')">Jenna G. <span class="role-badge role-MB">#19 MB</span></button>
+    <button class="tab-btn" data-tab="tab-18" onclick="switchTab('tab-18')">Aarnavi M. <span class="role-badge role-MB">#18 MB</span></button>
+    <button class="tab-btn" data-tab="tab-10" onclick="switchTab('tab-10')">Brenna O'C <span class="role-badge role-S">#10 S</span></button>
+    <button class="tab-btn" data-tab="tab-22" onclick="switchTab('tab-22')">Tanisha V. <span class="role-badge role-S">#22 S</span></button>
+    <button class="tab-btn" data-tab="tab-1" onclick="switchTab('tab-1')">Zlata L. <span class="role-badge role-LDS">#1 L</span></button>
+    <button class="tab-btn" data-tab="tab-4" onclick="switchTab('tab-4')">Emma F. <span class="role-badge role-LDS">#4 DS</span></button>
+    <button class="tab-btn" data-tab="tab-8" onclick="switchTab('tab-8')">Ava S. <span class="role-badge role-LDS">#8 DS</span></button>
+    <button class="tab-btn" data-tab="tab-9" onclick="switchTab('tab-9')">Sophia F. <span class="role-badge role-LDS">#9 DS</span></button>
+  </div>
+</nav>
+
+<main class="main">
+
+<!-- ===== TEAM OVERVIEW TAB ===== -->
+<div id="tab-team" class="tab-panel active">
+  <div class="callout">
+    <strong>Season Narrative:</strong> 13 Blue showed dramatic improvement from the first half (JAM/WIN both negative) to the second half. Attack% rose from .036 to .176 at MEQ. Team went +66 pts at MEQ — the season high. Isabella F. #11 and Tatiana R. #17 both showed major breakout performances in the back half.
+  </div>
+  <div class="cards-row" id="teamCards"></div>
+  <div class="chart-card">
+    <h3>Team Season Trends</h3>
+    <div class="chart-controls" id="teamTrendControls"></div>
+    <div class="chart-wrap" style="height:280px"><canvas id="chartTeamTrend"></canvas></div>
+  </div>
+  <div class="two-col">
+    <div class="chart-card">
+      <h3>Per-Set Volume (Kills / Errors / Aces / Serve Errors)</h3>
+      <div class="chart-wrap" style="height:220px"><canvas id="chartTeamVolume"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>Pts +/- Per Tournament</h3>
+      <div class="chart-wrap" style="height:220px"><canvas id="chartTeamPts"></canvas></div>
+    </div>
+  </div>
+  <div class="section-title">Player Contribution Heat Map</div>
+  <div class="callout" style="font-size:.75rem">
+    Click a cell to jump to that player's tab. Color = Attack% for hitters (OH/MB), Pass Rating for L/DS, Assists/Set for setters. Gray = Did Not Play.
+  </div>
+  <div class="chart-card">
+    <div class="stats-table-wrap" id="heatmapWrap"></div>
+  </div>
+</div>
+
+<!-- ===== PLAYER TABS (generated by JS) ===== -->
+<div id="tab-26" class="tab-panel"></div>
+<div id="tab-14" class="tab-panel"></div>
+<div id="tab-11" class="tab-panel"></div>
+<div id="tab-7"  class="tab-panel"></div>
+<div id="tab-17" class="tab-panel"></div>
+<div id="tab-19" class="tab-panel"></div>
+<div id="tab-18" class="tab-panel"></div>
+<div id="tab-10" class="tab-panel"></div>
+<div id="tab-22" class="tab-panel"></div>
+<div id="tab-1"  class="tab-panel"></div>
+<div id="tab-4"  class="tab-panel"></div>
+<div id="tab-8"  class="tab-panel"></div>
+<div id="tab-9"  class="tab-panel"></div>
+
+</main>
+
+<footer class="site-footer">
+  13 Blue Volleyball &nbsp;|&nbsp; 2025–26 Season &nbsp;|&nbsp; Defense stats excluded (per coach). Data through Power League 3 (3/28/26).
+</footer>
+
+<script>
+// ============================================================
+// DATA — All 8 tournaments, all 13 players, embedded inline
+// ============================================================
+
+const TOURNAMENTS = ['JAM','WIN','PLQ','PRE','PL1','PL2','MEQ','PL3'];
+const TOURNEY_LABELS = ['Jamboree','Winter Classic','PL Qualifier','Presidents Day','Power League 1','Power League 2','MEQ Qualifier','Power League 3'];
+const TOURNEY_DATES  = ['12/15/25','1/18/26','2/2/26','2/14/26','2/21/26','3/7/26','3/20/26','3/28/26'];
+const SETS = [15,16,12,18,12,12,18,9];
+
+// Team-level data (My Team row)
+const TEAM = {
+  sets:    [15,16,12,18,12,12,18,9],
+  K:       [89,95,93,138,85,69,154,65],
+  E:       [77,78,56,96,55,47,76,40],
+  TA:      [335,376,269,523,301,260,443,242],
+  atkPct:  [0.036,0.045,0.138,0.080,0.100,0.085,0.176,0.103],
+  SA:      [72,45,59,84,58,50,99,41],
+  SE:      [51,39,37,44,34,22,58,14],
+  srvPct:  [0.830,0.868,0.857,0.889,0.865,0.898,0.849,0.927],
+  srvEff:  [0.070,0.020,0.085,0.101,0.095,0.130,0.106,0.141],
+  R3:      [37,36,23,49,33,21,30,24],
+  R2:      [42,65,36,68,49,37,73,47],
+  R1:      [109,135,86,137,92,122,123,64],
+  R0:      [56,58,37,49,42,54,53,20],
+  RTA:     [244,294,182,303,216,234,279,155],
+  passRtg: [1.246,1.269,1.247,1.386,1.338,1.107,1.287,1.484],
+  pts:     [-27,-45.5,25.5,30,16.5,-7,66,36],
+};
+
+// Per-player data — null = absent / no data
+const PLAYERS = {
+  p26: {
+    name:"Ava N.", jersey:"#26", role:"OH", tabId:"tab-26",
+    narrative:"Primary attacker and passer. Season engine — leads team in kills every tournament. Atk% dipped mid-season but rebounded.",
+    sets:  [12,16,12,18,12,12,18,9],
+    K:     [25,31,29,48,17,18,32,13],
+    E:     [7,11,12,29,13,13,18,7],
+    TA:    [64,98,75,169,59,66,114,53],
+    atkPct:[0.281,0.204,0.227,0.112,0.068,0.076,0.123,0.113],
+    KperS: [2.08,1.94,3.22,2.67,1.42,1.50,1.78,1.44],
+    SA:    [5,12,15,8,10,6,20,5],
+    SE:    [5,7,7,6,7,3,10,0],
+    sTA:   [26,47,32,54,34,25,59,23],
+    srvPct:[0.808,0.851,0.781,0.889,0.794,0.880,0.831,1.000],
+    srvEff:[0.000,0.106,0.250,0.037,0.088,0.120,0.169,0.217],
+    srvRtg:[1.538,1.447,1.281,1.444,1.353,1.720,1.339,1.435],
+    R3:    [12,11,4,15,8,1,7,9],
+    R2:    [13,12,9,10,10,8,26,10],
+    R1:    [29,42,12,37,27,31,33,19],
+    R0:    [10,9,4,17,15,11,14,5],
+    RTA:   [64,74,29,79,60,51,80,43],
+    passRtg:[1.422,1.338,1.448,1.291,1.183,0.980,1.325,1.535],
+  },
+  p14: {
+    name:"Emma L.", jersey:"#14", role:"OH", tabId:"tab-14",
+    narrative:"Outside hitter and heavy passer. Absent MEQ. Strong PRE showing (29 SAs). Late-season regression in attack at PL3.",
+    sets:  [14,15,12,17,12,12,null,9],
+    K:     [21,17,14,24,16,15,null,8],
+    E:     [16,10,10,19,8,10,null,12],
+    TA:    [75,69,42,104,68,66,null,51],
+    atkPct:[0.067,0.101,0.095,0.048,0.118,0.076,null,-0.078],
+    KperS: [1.50,1.13,1.17,1.41,1.33,1.25,null,0.89],
+    SA:    [16,4,11,29,11,8,null,9],
+    SE:    [10,5,5,13,10,5,null,4],
+    sTA:   [47,50,48,98,52,33,null,42],
+    srvPct:[0.787,0.900,0.896,0.867,0.808,0.848,null,0.905],
+    srvEff:[0.128,-0.020,0.125,0.163,0.019,0.091,null,0.119],
+    srvRtg:[1.196,1.939,1.229,1.337,1.481,1.242,null,1.262],
+    R3:    [13,10,3,15,15,7,null,6],
+    R2:    [9,23,8,21,17,10,null,12],
+    R1:    [21,16,16,29,21,37,null,8],
+    R0:    [9,12,7,5,8,15,null,3],
+    RTA:   [52,61,34,70,61,69,null,29],
+    passRtg:[1.500,1.508,1.206,1.657,1.639,1.130,null,1.724],
+  },
+  p11: {
+    name:"Isabella F.", jersey:"#11", role:"OH", tabId:"tab-11",
+    narrative:"Breakout season — clearest improvement arc. Went from .062 Atk% in JAM to .240 in PL3. Strong MEQ (18 sets, 34K).",
+    sets:  [11,12,6,14,12,11,18,9],
+    K:     [4,9,3,12,19,18,34,19],
+    E:     [3,7,4,11,12,8,20,7],
+    TA:    [16,28,13,48,49,53,91,50],
+    atkPct:[0.062,0.071,-0.077,0.021,0.143,0.189,0.154,0.240],
+    KperS: [0.36,0.75,0.50,0.86,1.58,1.64,1.89,2.11],
+    SA:    [5,4,0,5,8,5,14,7],
+    SE:    [4,1,0,4,5,3,7,4],
+    sTA:   [27,25,null,33,44,29,64,29],
+    srvPct:[0.852,0.960,null,0.879,0.886,0.897,0.891,0.862],
+    srvEff:[0.037,0.120,null,0.030,0.068,0.069,0.109,0.103],
+    srvRtg:[1.481,1.360,null,1.576,1.659,1.621,1.328,1.517],
+    R3:    [null,null,null,null,null,null,1,null],
+    R2:    [null,null,null,null,null,null,1,1],
+    R1:    [1,null,null,null,null,null,1,null],
+    R0:    [null,1,null,null,1,1,1,1],
+    RTA:   [1,1,null,null,1,1,4,2],
+    passRtg:[1.000,null,null,null,null,null,1.500,1.000],
+  },
+  p7: {
+    name:"Amelia D.", jersey:"#7", role:"OH", tabId:"tab-7",
+    narrative:"High-variance hitter. Swings from -.323 (JAM) to .175 (MEQ) back to -.107 (PL3). Strong MEQ performance warrants watching.",
+    sets:  [12,14,12,13,8,9,18,8],
+    K:     [6,11,15,13,6,4,39,5],
+    E:     [16,8,8,11,7,4,22,8],
+    TA:    [31,42,42,52,26,17,97,28],
+    atkPct:[-0.323,0.071,0.167,0.038,-0.038,0.000,0.175,-0.107],
+    KperS: [0.50,0.79,1.25,1.00,0.75,0.44,2.17,0.63],
+    SA:    [7,3,10,1,null,0,19,1],
+    SE:    [5,6,6,2,null,0,12,0],
+    sTA:   [25,34,47,14,null,2,69,2],
+    srvPct:[0.800,0.824,0.872,0.857,null,1.000,0.826,1.000],
+    srvEff:[0.080,-0.088,0.085,-0.071,null,0.000,0.101,0.500],
+    srvRtg:[1.560,1.706,1.404,1.714,null,2.000,1.304,1.500],
+    R3:    [1,null,null,null,null,null,2,1],
+    R2:    [2,null,null,2,null,null,8,1],
+    R1:    [2,1,3,6,null,null,24,6],
+    R0:    [1,null,null,1,null,null,11,1],
+    RTA:   [6,1,3,9,null,null,45,9],
+    passRtg:[1.500,1.000,1.000,1.111,null,null,1.022,1.222],
+  },
+  p17: {
+    name:"Tatiana R.", jersey:"#17", role:"MB", tabId:"tab-17",
+    narrative:"Middle blocker with dramatic late-season surge. .429 Atk% at MEQ is a season high — went from 0% in WIN to dominant performer.",
+    sets:  [12,16,12,13,11,10,15,7],
+    K:     [12,14,14,9,9,6,17,9],
+    E:     [7,14,10,4,5,6,2,2],
+    TA:    [43,52,40,30,31,24,35,23],
+    atkPct:[0.116,0.000,0.100,0.167,0.129,0.000,0.429,0.304],
+    KperS: [1.00,0.88,1.17,0.69,0.82,0.60,1.13,1.29],
+    SA:    [4,13,8,6,6,5,5,0],
+    SE:    [3,4,5,8,7,1,5,0],
+    sTA:   [14,51,32,35,22,16,33,1],
+    srvPct:[0.786,0.922,0.844,0.771,0.682,0.938,0.848,1.000],
+    srvEff:[0.071,0.176,0.094,-0.057,-0.045,0.250,0.000,0.000],
+    srvRtg:[1.714,1.353,1.438,1.657,1.818,1.467,1.485,2.000],
+    R3:    [2,3,3,null,1,null,null,null],
+    R2:    [4,9,2,null,1,null,1,null],
+    R1:    [9,16,13,null,3,null,6,null],
+    R0:    [7,5,6,null,1,1,2,null],
+    RTA:   [22,33,24,null,6,1,9,null],
+    passRtg:[1.045,1.303,1.083,null,1.333,null,0.889,null],
+  },
+  p19: {
+    name:"Jenna G.", jersey:"#19", role:"MB", tabId:"tab-19",
+    narrative:"Limited-role MB. Low sets played (2–8 per tournament). Absent MEQ. Developmental player.",
+    sets:  [8,6,7,7,5,2,null,3],
+    K:     [3,1,1,1,1,0,null,1],
+    E:     [9,3,1,7,1,0,null,2],
+    TA:    [19,12,6,18,9,2,null,4],
+    atkPct:[-0.316,-0.167,0.000,-0.333,0.000,0.000,null,-0.250],
+    KperS: [0.38,0.17,0.14,0.14,0.20,0.00,null,0.33],
+    SA:    [null,null,3,0,null,0,null,null],
+    SE:    [null,null,0,1,null,0,null,null],
+    sTA:   [null,null,6,2,null,3,null,null],
+    srvPct:[null,null,1.000,0.500,null,1.000,null,null],
+    srvEff:[null,null,0.500,-0.500,null,0.000,null,null],
+    srvRtg:[null,null,0.833,2.000,null,2.000,null,null],
+    R3:    [null,null,null,null,null,null,null,null],
+    R2:    [null,null,null,null,null,null,null,null],
+    R1:    [null,null,null,null,null,null,null,null],
+    R0:    [null,null,null,null,null,null,null,null],
+    RTA:   [null,null,null,null,null,null,null,null],
+    passRtg:[null,null,null,null,null,null,null,null],
+  },
+  p18: {
+    name:"Aarnavi M.", jersey:"#18", role:"MB", tabId:"tab-18",
+    narrative:"Limited-role MB. 4–7 sets per tournament. Absent MEQ. Inconsistent attack numbers.",
+    sets:  [4,4,4,7,4,4,null,4],
+    K:     [3,0,2,3,3,0,null,1],
+    E:     [1,5,2,4,1,0,null,1],
+    TA:    [7,7,7,17,9,1,null,6],
+    atkPct:[0.286,-0.714,0.000,-0.059,0.222,0.000,null,0.000],
+    KperS: [0.75,0.00,0.50,0.43,0.75,0.00,null,0.25],
+    SA:    [null,null,null,4,0,0,null,null],
+    SE:    [null,null,null,1,0,0,null,null],
+    sTA:   [null,null,null,14,1,1,null,null],
+    srvPct:[null,null,null,0.929,1.000,1.000,null,null],
+    srvEff:[null,null,null,0.214,0.000,0.000,null,null],
+    srvRtg:[null,null,null,1.071,1.000,3.000,null,null],
+    R3:    [null,null,null,null,null,null,null,null],
+    R2:    [null,null,null,null,null,null,null,null],
+    R1:    [null,null,null,null,null,null,null,null],
+    R0:    [null,null,null,null,null,null,null,null],
+    RTA:   [null,null,null,null,null,null,null,null],
+    passRtg:[null,null,null,null,null,null,null,null],
+  },
+  p10: {
+    name:"Brenna O'Connor", jersey:"#10", role:"S", tabId:"tab-10",
+    narrative:"Primary setter every tournament. Serving improved dramatically — Srv Eff from .049 (JAM) to .205 (PL3). Sets 50–82 assists per tournament.",
+    sets:  [15,16,12,18,12,12,18,9],
+    astPerS:  [50/15, 49/16, 54/12, 73/18, 44/12, 32/12, 82/18, 37/9],
+    ast:   [50,49,54,73,44,32,82,37],
+    setTA: [191,212,152,291,163,129,254,134],
+    setSE: [1,7,2,3,2,1,0,0],
+    set3:  [null,6,6,9,2,4,7,6],
+    set2:  [null,15,13,34,11,9,19,8],
+    set1:  [null,12,11,16,11,5,20,11],
+    set0:  [null,76,76,134,87,78,130,66],
+    SA:    [11,5,9,20,11,10,16,11],
+    SE:    [8,9,9,3,1,1,11,2],
+    sTA:   [61,52,49,85,56,53,77,44],
+    srvPct:[0.869,0.827,0.816,0.965,0.982,0.981,0.857,0.955],
+    srvEff:[0.049,-0.077,0.000,0.200,0.179,0.170,0.065,0.205],
+    srvRtg:[1.443,1.808,1.551,1.200,1.179,1.358,1.368,1.205],
+  },
+  p22: {
+    name:"Tanisha V.", jersey:"#22", role:"S", tabId:"tab-22",
+    narrative:"Backup setter / DS hybrid. Setting volume lower than Brenna's but consistent. Passing load varies by tournament.",
+    sets:  [13,12,11,17,11,12,18,9],
+    astPerS:  [18/13, 15/12, 16/11, 29/17, 22/11, 14/12, 30/18, 10/9],
+    ast:   [18,15,16,29,22,14,30,10],
+    setTA: [92,93,74,141,92,73,110,68],
+    setSE: [0,2,0,2,1,1,0,0],
+    set3:  [null,2,1,2,1,null,2,1],
+    set2:  [null,7,2,7,4,1,6,2],
+    set1:  [null,5,2,8,5,6,6,4],
+    set0:  [null,36,40,73,57,38,60,39],
+    SA:    [0,null,null,null,null,null,1,null],
+    SE:    [2,null,null,null,null,null,1,null],
+    sTA:   [4,null,null,null,null,null,2,null],
+    srvPct:[0.500,null,null,null,null,null,0.500,null],
+    srvEff:[-0.500,null,null,null,null,null,0.000,null],
+    srvRtg:[2.667,null,null,null,null,null,1.500,null],
+    R3:    [null,null,null,null,null,null,null,null],
+    R2:    [null,null,null,null,null,1,null,null],
+    R1:    [1,1,null,null,null,1,null,null],
+    R0:    [null,1,null,null,null,null,1,null],
+    RTA:   [1,2,null,null,null,1,1,null],
+    passRtg:[1.000,0.500,null,null,null,2.000,null,null],
+  },
+  p1: {
+    name:"Zlata L.", jersey:"#1", role:"L/DS", tabId:"tab-1",
+    narrative:"True libero. Near-zero attacks; highest receive load. Pass rating improving through PRE (.036→.407 trend). Key defensive anchor.",
+    sets:  [13,15,12,16,9,12,14,7],
+    SA:    [0,0,0,0,null,null,4,1],
+    SE:    [0,0,0,0,null,null,1,0],
+    sTA:   [1,3,4,2,null,null,13,4],
+    srvPct:[1.000,1.000,1.000,1.000,null,null,0.923,1.000],
+    srvEff:[0.000,0.000,0.000,0.000,null,null,0.231,0.250],
+    srvRtg:[1.000,2.333,1.750,1.000,null,null,0.923,1.000],
+    R3:    [6,8,4,10,3,6,4,null],
+    R2:    [11,14,15,29,5,7,8,7],
+    R1:    [30,40,25,40,12,19,15,6],
+    R0:    [19,23,12,12,4,13,6,3],
+    RTA:   [66,85,56,91,24,45,33,16],
+    passRtg:[1.061,1.082,1.196,1.407,1.292,1.133,1.303,1.250],
+    digs:  [31,38,21,48,13,17,17,11],
+  },
+  p4: {
+    name:"Emma F.", jersey:"#4", role:"L/DS", tabId:"tab-4",
+    narrative:"DS specialist whose passing volume surged from PL1 onward. Heaviest passing load in later season alongside Zlata.",
+    sets:  [7,12,11,9,12,12,18,8],
+    SA:    [3,4,1,1,8,13,10,1],
+    SE:    [4,3,2,0,2,7,6,2],
+    sTA:   [11,22,16,4,20,38,31,12],
+    srvPct:[0.636,0.864,0.875,1.000,0.900,0.816,0.806,0.833],
+    srvEff:[-0.091,0.045,-0.062,0.250,0.300,0.158,0.129,-0.083],
+    srvRtg:[1.727,1.818,1.375,1.500,1.150,1.395,1.241,1.917],
+    R3:    [2,2,6,5,6,7,14,7],
+    R2:    [2,3,1,3,16,9,24,14],
+    R1:    [4,7,13,7,29,29,28,18],
+    R0:    [6,null,5,5,12,13,13,5],
+    RTA:   [14,12,25,20,63,58,79,44],
+    passRtg:[1.000,1.583,1.320,1.400,1.254,1.172,1.494,1.523],
+    digs:  [7,9,11,19,21,29,40,20],
+  },
+  p8: {
+    name:"Ava S.", jersey:"#8", role:"L/DS", tabId:"tab-8",
+    narrative:"DS / Libero hybrid who also contributes some attack. Breakout at MEQ: .343 Atk% (season best). Strong serving consistency.",
+    sets:  [15,11,9,15,8,8,18,8],
+    K:     [5,3,4,10,3,2,14,6],
+    E:     [6,7,3,2,2,2,2,1],
+    TA:    [31,19,15,25,15,13,35,20],
+    atkPct:[-0.032,-0.211,0.067,0.320,0.067,0.000,0.343,0.250],
+    KperS: [0.33,0.27,0.44,0.67,0.38,0.25,0.78,0.75],
+    SA:    [6,0,1,4,4,3,6,4],
+    SE:    [1,2,1,2,0,2,3,1],
+    sTA:   [40,4,21,19,20,15,27,27],
+    srvPct:[0.975,0.500,0.952,0.895,1.000,0.867,0.889,0.963],
+    srvEff:[0.125,-0.500,0.000,0.105,0.200,0.067,0.111,0.111],
+    srvRtg:[1.625,2.750,1.714,1.211,1.350,1.800,1.148,1.667],
+    R3:    [null,null,null,null,null,null,null,null],
+    R2:    [1,null,null,null,null,null,null,null],
+    R1:    [1,1,null,1,null,null,3,null],
+    R0:    [null,null,null,1,1,null,2,null],
+    RTA:   [2,1,null,2,1,null,5,null],
+    passRtg:[1.500,1.000,null,0.500,null,null,0.600,null],
+    digs:  [9,6,5,10,4,2,2,6],
+  },
+  p9: {
+    name:"Sophia F.", jersey:"#9", role:"L/DS", tabId:"tab-9",
+    narrative:"Back-row specialist. Heavy serving load early season (15 SAs at JAM). Consistent passer, reliable dig contributor.",
+    sets:  [13,9,8,15,5,7,12,6],
+    SA:    [15,0,1,6,0,null,4,2],
+    SE:    [9,2,2,4,2,null,2,1],
+    sTA:   [44,8,3,38,3,null,10,7],
+    srvPct:[0.795,0.750,0.333,0.895,0.333,null,0.800,0.857],
+    srvEff:[0.136,-0.250,-0.333,0.053,-0.667,null,0.200,0.143],
+    srvRtg:[1.227,2.000,2.000,1.368,2.667,null,1.200,1.429],
+    R3:    [1,2,3,4,null,2,2,1],
+    R2:    [null,4,null,1,null,6,5,2],
+    R1:    [10,11,4,16,null,null,13,7],
+    R0:    [4,7,3,8,null,null,3,2],
+    RTA:   [15,24,10,29,null,8,23,12],
+    passRtg:[0.867,1.042,1.300,1.034,null,1.250,1.261,1.167],
+    digs:  [8,11,8,17,5,9,10,5],
+  },
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let normalizePerSet = true;
+let activeTab = 'tab-team';
+const chartInstances = {};
+
+// ============================================================
+// UTILS
+// ============================================================
+function fmt(v, decimals=3) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v !== 'number') return v;
+  return v.toFixed(decimals);
+}
+function fmtPct(v) {
+  if (v === null || v === undefined) return '—';
+  const s = (v >= 0 ? '+' : '') + (v*100).toFixed(1) + '%';
+  return s;
+}
+function nullSafe(arr) { return arr.map(v => (v === null || v === undefined) ? null : v); }
+function avgNonNull(arr) {
+  const vals = arr.filter(v => v !== null && v !== undefined);
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+function trendArrow(current, prev, threshold=0.01) {
+  if (current === null || prev === null) return {sym:'—', cls:'trend-flat'};
+  const delta = current - prev;
+  if (delta > threshold) return {sym:'↑', cls:'trend-up'};
+  if (delta < -threshold) return {sym:'↓', cls:'trend-down'};
+  return {sym:'→', cls:'trend-flat'};
+}
+
+function colorAtk(v) {
+  if (v === null) return '';
+  if (v >= 0.200) return 'td-good';
+  if (v >= 0.050) return 'td-avg';
+  return 'td-poor';
+}
+function colorSrvPct(v) {
+  if (v === null) return '';
+  if (v >= 0.900) return 'td-good';
+  if (v >= 0.850) return 'td-avg';
+  return 'td-poor';
+}
+function colorSrvEff(v) {
+  if (v === null) return '';
+  if (v >= 0.150) return 'td-good';
+  if (v >= 0.050) return 'td-avg';
+  return 'td-poor';
+}
+function colorPass(v) {
+  if (v === null) return '';
+  if (v >= 1.400) return 'td-good';
+  if (v >= 1.200) return 'td-avg';
+  return 'td-poor';
+}
+function colorPts(v) {
+  if (v === null) return '';
+  if (v >= 20) return 'td-good';
+  if (v >= -10) return 'td-avg';
+  return 'td-poor';
+}
+
+// Heat-map color scale: red → yellow → green
+function heatColor(val, min, max) {
+  if (val === null || val === undefined) return '#eceff1';
+  const t = Math.max(0, Math.min(1, (val - min) / (max - min)));
+  if (t < 0.5) {
+    const r = 220, g = Math.round(220 * (t*2)), b = 80;
+    return `rgb(${r},${g},${b})`;
+  } else {
+    const r = Math.round(220 * (1 - (t-0.5)*2)), g = 180, b = 80;
+    return `rgb(${r},${g},${b})`;
+  }
+}
+
+function destroyChart(id) {
+  if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+function makeChart(id, config) {
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  chartInstances[id] = new Chart(ctx, config);
+  return chartInstances[id];
+}
+
+function perSetVal(val, setIdx) {
+  if (!normalizePerSet) return val;
+  if (val === null || val === undefined) return null;
+  return val / SETS[setIdx];
+}
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+function switchTab(tabId) {
+  activeTab = tabId;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(b => b.classList.add('active'));
+  const sel = document.getElementById('mobileSelect');
+  if (sel) sel.value = tabId;
+  renderTab(tabId);
+}
+
+// ============================================================
+// NORMALIZE TOGGLE
+// ============================================================
+function toggleNormalize() {
+  normalizePerSet = true;
+  document.getElementById('btnPerSet').classList.add('active');
+  document.getElementById('btnRaw').classList.remove('active');
+  renderTab(activeTab);
+}
+function toggleRaw() {
+  normalizePerSet = false;
+  document.getElementById('btnRaw').classList.add('active');
+  document.getElementById('btnPerSet').classList.remove('active');
+  renderTab(activeTab);
+}
+
+// ============================================================
+// RENDER DISPATCHER
+// ============================================================
+function renderTab(tabId) {
+  if (tabId === 'tab-team') { renderTeamTab(); return; }
+  // find player by tabId
+  const p = Object.values(PLAYERS).find(x => x.tabId === tabId);
+  if (!p) return;
+  if (p.role === 'S') renderSetterTab(p);
+  else if (p.role === 'L/DS') renderDSTab(p);
+  else renderHitterTab(p);
+}
+
+// ============================================================
+// TEAM OVERVIEW TAB
+// ============================================================
+function renderTeamTab() {
+  renderTeamCards();
+  renderTeamTrendChart();
+  renderTeamVolumeChart();
+  renderTeamPtsChart();
+  renderHeatMap();
+}
+
+function renderTeamCards() {
+  const container = document.getElementById('teamCards');
+  if (!container) return;
+  const lastIdx = 7;
+  const prevIdx = 6;
+  const avgAtk = avgNonNull(TEAM.atkPct);
+  const avgSrv = avgNonNull(TEAM.srvEff);
+  const avgPass = avgNonNull(TEAM.passRtg);
+  const totalPts = TEAM.pts.reduce((a,b)=>a+b,0);
+  const latestAtk = TEAM.atkPct[lastIdx];
+  const latestSrv = TEAM.srvEff[lastIdx];
+  const latestPass = TEAM.passRtg[lastIdx];
+  const latestPts = TEAM.pts[lastIdx];
+
+  const tAtk  = trendArrow(TEAM.atkPct[lastIdx], TEAM.atkPct[prevIdx]);
+  const tSrv  = trendArrow(TEAM.srvEff[lastIdx], TEAM.srvEff[prevIdx]);
+  const tPass = trendArrow(TEAM.passRtg[lastIdx], TEAM.passRtg[prevIdx]);
+  const tPts  = trendArrow(TEAM.pts[lastIdx], TEAM.pts[prevIdx], 5);
+
+  container.innerHTML = `
+    <div class="stat-card" style="border-left-color:${latestAtk>=.200?'#2e7d32':latestAtk>=.050?'#f9a825':'#c62828'}">
+      <div class="card-label">Team Attack%</div>
+      <div class="card-value">${fmt(latestAtk,3)}</div>
+      <div class="card-trend ${tAtk.cls}">${tAtk.sym} vs MEQ &nbsp;|&nbsp; Season avg: ${fmt(avgAtk,3)}</div>
+      <div class="sparkline-wrap"><canvas id="spkAtk"></canvas></div>
+    </div>
+    <div class="stat-card" style="border-left-color:${latestSrv>=.150?'#2e7d32':latestSrv>=.050?'#f9a825':'#c62828'}">
+      <div class="card-label">Team Serve Efficiency</div>
+      <div class="card-value">${fmt(latestSrv,3)}</div>
+      <div class="card-trend ${tSrv.cls}">${tSrv.sym} vs MEQ &nbsp;|&nbsp; Season avg: ${fmt(avgSrv,3)}</div>
+      <div class="sparkline-wrap"><canvas id="spkSrv"></canvas></div>
+    </div>
+    <div class="stat-card" style="border-left-color:${latestPass>=1.400?'#2e7d32':latestPass>=1.200?'#f9a825':'#c62828'}">
+      <div class="card-label">Team Pass Rating</div>
+      <div class="card-value">${fmt(latestPass,3)}</div>
+      <div class="card-trend ${tPass.cls}">${tPass.sym} vs MEQ &nbsp;|&nbsp; Season avg: ${fmt(avgPass,3)}</div>
+      <div class="sparkline-wrap"><canvas id="spkPass"></canvas></div>
+    </div>
+    <div class="stat-card" style="border-left-color:${latestPts>=20?'#2e7d32':latestPts>=-10?'#f9a825':'#c62828'}">
+      <div class="card-label">Pts +/- (Season Total)</div>
+      <div class="card-value">${totalPts >= 0 ? '+' : ''}${totalPts}</div>
+      <div class="card-trend ${tPts.cls}">${tPts.sym} vs MEQ &nbsp;|&nbsp; PL3: ${latestPts >= 0 ? '+' : ''}${latestPts}</div>
+      <div class="sparkline-wrap"><canvas id="spkPts"></canvas></div>
+    </div>
+  `;
+  // Sparklines
+  function makeSparkline(id, data, color) {
+    const c = document.getElementById(id);
+    if (!c) return;
+    new Chart(c, {
+      type:'line',
+      data:{labels:TOURNAMENTS, datasets:[{data, borderColor:color, borderWidth:2, pointRadius:2, tension:0.3, fill:false}]},
+      options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{enabled:false}}, scales:{x:{display:false},y:{display:false}}, animation:{duration:0}}
+    });
+  }
+  makeSparkline('spkAtk', TEAM.atkPct, '#1a3a6b');
+  makeSparkline('spkSrv', TEAM.srvEff, '#e8a020');
+  makeSparkline('spkPass', TEAM.passRtg, '#2e7d32');
+  makeSparkline('spkPts', TEAM.pts, '#7b1fa2');
+}
+
+function renderTeamTrendChart() {
+  const controls = document.getElementById('teamTrendControls');
+  controls.innerHTML = `
+    <label><input type="checkbox" checked id="chkAtk" onchange="updateTeamTrend()"> <span style="color:#1a3a6b;font-weight:700">● Attack%</span></label>
+    <label><input type="checkbox" checked id="chkSrv" onchange="updateTeamTrend()"> <span style="color:#e8a020;font-weight:700">● Serve Eff</span></label>
+    <label><input type="checkbox" checked id="chkPass" onchange="updateTeamTrend()"> <span style="color:#2e7d32;font-weight:700">● Pass Rating</span></label>
+    <label><input type="checkbox" checked id="chkPts" onchange="updateTeamTrend()"> <span style="color:#7b1fa2;font-weight:700">● Pts +/-</span></label>
+  `;
+  buildTeamTrendChart();
+}
+
+function buildTeamTrendChart() {
+  const showAtk  = document.getElementById('chkAtk')?.checked !== false;
+  const showSrv  = document.getElementById('chkSrv')?.checked !== false;
+  const showPass = document.getElementById('chkPass')?.checked !== false;
+  const showPts  = document.getElementById('chkPts')?.checked !== false;
+  destroyChart('chartTeamTrend');
+  const ctx = document.getElementById('chartTeamTrend');
+  if (!ctx) return;
+  const datasets = [];
+  if (showAtk)  datasets.push({label:'Attack%',data:TEAM.atkPct,borderColor:'#1a3a6b',backgroundColor:'rgba(26,58,107,0.08)',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:4,pointHoverRadius:6});
+  if (showSrv)  datasets.push({label:'Serve Eff',data:TEAM.srvEff,borderColor:'#e8a020',backgroundColor:'rgba(232,160,32,0.08)',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:4,pointHoverRadius:6});
+  if (showPass) datasets.push({label:'Pass Rating',data:TEAM.passRtg,borderColor:'#2e7d32',backgroundColor:'rgba(46,125,50,0.08)',borderWidth:2.5,tension:0.3,yAxisID:'y2',pointRadius:4,pointHoverRadius:6});
+  if (showPts)  datasets.push({label:'Pts +/-',data:TEAM.pts,borderColor:'#7b1fa2',backgroundColor:'rgba(123,31,162,0.08)',borderWidth:2,tension:0.3,yAxisID:'y3',pointRadius:4,pointHoverRadius:6,borderDash:[5,4]});
+  chartInstances['chartTeamTrend'] = new Chart(ctx, {
+    type:'line',
+    data:{labels:TOURNEY_LABELS, datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{
+          label: ctx => `${ctx.dataset.label}: ${fmt(ctx.raw,3)}`
+        }}
+      },
+      scales:{
+        x:{ticks:{font:{size:11}}, grid:{color:'rgba(0,0,0,0.05)'}},
+        y1:{type:'linear',position:'left',title:{display:true,text:'Rate',font:{size:11}},grid:{color:'rgba(0,0,0,0.05)'}},
+        y2:{type:'linear',position:'left',title:{display:true,text:'Pass Rtg'},display:false},
+        y3:{type:'linear',position:'right',title:{display:true,text:'Pts +/-',font:{size:11}},grid:{display:false}},
+      }
+    }
+  });
+}
+function updateTeamTrend() { buildTeamTrendChart(); }
+
+function renderTeamVolumeChart() {
+  destroyChart('chartTeamVolume');
+  const ctx = document.getElementById('chartTeamVolume');
+  if (!ctx) return;
+  const scale = i => normalizePerSet ? 1/SETS[i] : 1;
+  const k  = TEAM.K.map((v,i)=>v*scale(i));
+  const e  = TEAM.E.map((v,i)=>v*scale(i));
+  const sa = TEAM.SA.map((v,i)=>v*scale(i));
+  const se = TEAM.SE.map((v,i)=>v*scale(i));
+  chartInstances['chartTeamVolume'] = new Chart(ctx, {
+    type:'bar',
+    data:{labels:TOURNEY_LABELS, datasets:[
+      {label:'Kills', data:k, backgroundColor:'rgba(26,58,107,0.75)'},
+      {label:'Attack Errors', data:e, backgroundColor:'rgba(198,40,40,0.65)'},
+      {label:'Serve Aces', data:sa, backgroundColor:'rgba(46,125,50,0.75)'},
+      {label:'Serve Errors', data:se, backgroundColor:'rgba(232,160,32,0.75)'},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+      scales:{x:{ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}},title:{display:true,text:normalizePerSet?'Per Set':'Total',font:{size:10}}}}
+    }
+  });
+}
+
+function renderTeamPtsChart() {
+  destroyChart('chartTeamPts');
+  const ctx = document.getElementById('chartTeamPts');
+  if (!ctx) return;
+  const colors = TEAM.pts.map(v => v >= 0 ? 'rgba(46,125,50,0.8)' : 'rgba(198,40,40,0.7)');
+  chartInstances['chartTeamPts'] = new Chart(ctx, {
+    type:'bar',
+    data:{labels:TOURNEY_LABELS, datasets:[{label:'Pts +/-',data:TEAM.pts,backgroundColor:colors,borderWidth:0}]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`Pts: ${c.raw >= 0?'+':''}${c.raw}`}}},
+      scales:{
+        x:{ticks:{font:{size:10}}},
+        y:{ticks:{font:{size:10}},title:{display:true,text:'Points +/-',font:{size:10}},
+          afterDataLimits:(scale)=>{scale.min=Math.min(scale.min,-10); scale.max=Math.max(scale.max,10);}}
+      }
+    }
+  });
+}
+
+function renderHeatMap() {
+  const wrap = document.getElementById('heatmapWrap');
+  if (!wrap) return;
+  // Define rows in desired order
+  const rows = [
+    {key:'p26', metricFn: p => p.atkPct},
+    {key:'p14', metricFn: p => p.atkPct},
+    {key:'p11', metricFn: p => p.atkPct},
+    {key:'p7',  metricFn: p => p.atkPct},
+    {key:'p17', metricFn: p => p.atkPct},
+    {key:'p19', metricFn: p => p.atkPct},
+    {key:'p18', metricFn: p => p.atkPct},
+    {key:'p10', metricFn: p => p.astPerS},
+    {key:'p22', metricFn: p => p.astPerS},
+    {key:'p1',  metricFn: p => p.passRtg},
+    {key:'p4',  metricFn: p => p.passRtg},
+    {key:'p8',  metricFn: p => p.passRtg},
+    {key:'p9',  metricFn: p => p.passRtg},
+  ];
+  // Calculate min/max per metric type
+  const atkVals = [], passVals = [], astVals = [];
+  rows.forEach(row => {
+    const p = PLAYERS[row.key];
+    const vals = row.metricFn(p).filter(v=>v!==null&&v!==undefined);
+    if (row.key==='p10'||row.key==='p22') astVals.push(...vals);
+    else if (p.role==='L/DS') passVals.push(...vals);
+    else atkVals.push(...vals);
+  });
+  const atkMin=Math.min(...atkVals), atkMax=Math.max(...atkVals);
+  const passMin=Math.min(...passVals), passMax=Math.max(...passVals);
+  const astMin=Math.min(...astVals), astMax=Math.max(...astVals);
+
+  let html = `<table class="heatmap-table"><thead><tr><th style="text-align:left;min-width:130px;">Player</th><th>Role</th>`;
+  TOURNAMENTS.forEach((t,i)=>{ html += `<th>${t}<br><small style="font-weight:400;opacity:.7">${TOURNEY_DATES[i]}</small></th>`; });
+  html += `<th>Metric</th></tr></thead><tbody>`;
+
+  rows.forEach(row => {
+    const p = PLAYERS[row.key];
+    const vals = row.metricFn(p);
+    const isSetter = (p.role==='S');
+    const isDS     = (p.role==='L/DS');
+    const metricLabel = isSetter ? 'Ast/Set' : isDS ? 'Pass Rtg' : 'Atk%';
+    const [cMin,cMax] = isSetter ? [astMin,astMax] : isDS ? [passMin,passMax] : [atkMin,atkMax];
+    html += `<tr><td class="player-name-cell">${p.name} <span style="color:#aaa;font-size:.68rem">${p.jersey}</span></td>`;
+    html += `<td style="text-align:center;background:#fff"><span class="role-badge role-${p.role.replace('/','')}">${p.role}</span></td>`;
+    vals.forEach((v, i) => {
+      const setsPlayed = p.sets ? p.sets[i] : SETS[i];
+      if (v === null || setsPlayed === null) {
+        html += `<td class="td-dnp" onclick="switchTab('${p.tabId}')">DNP</td>`;
+      } else {
+        const bg = heatColor(v, cMin, cMax);
+        const txtColor = v !== null && (v - cMin)/(cMax-cMin) > 0.7 ? '#1a3a2e' : (v - cMin)/(cMax-cMin) < 0.3 ? '#5c0000' : '#2a2a0e';
+        const display = isSetter ? fmt(v,2) : isDS ? fmt(v,3) : fmt(v,3);
+        html += `<td style="background:${bg};color:${txtColor}" onclick="switchTab('${p.tabId}')">${display}</td>`;
+      }
+    });
+    html += `<td style="font-size:.7rem;color:#888;background:#fff">${metricLabel}</td></tr>`;
+  });
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+}
+
+// ============================================================
+// HITTER TAB
+// ============================================================
+function renderHitterTab(p) {
+  const el = document.getElementById(p.tabId);
+  if (!el) return;
+  // Build HTML structure
+  el.innerHTML = `
+    ${playerHeaderHTML(p)}
+    ${narrativeCallout(p)}
+    <div class="two-col">
+      <div class="chart-card">
+        <h3>Hitting Trend</h3>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_hit"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Serving Trend</h3>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_srv"></canvas></div>
+      </div>
+    </div>
+    ${hasPassData(p) ? `
+    <div class="chart-card">
+      <h3>Passing Breakdown</h3>
+      <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_pass"></canvas></div>
+    </div>
+    ` : ''}
+    <div class="chart-card">
+      <h3>Tournament Stats Table</h3>
+      <div class="stats-table-wrap">${hitterTableHTML(p)}</div>
+    </div>
+  `;
+  renderHitterCharts(p);
+}
+
+function hasPassData(p) {
+  return p.RTA && p.RTA.some(v => v !== null && v > 3);
+}
+
+function playerHeaderHTML(p) {
+  return `<div class="player-header">
+    <div class="player-jersey">${p.jersey}</div>
+    <div class="player-info">
+      <h2>${p.name}</h2>
+      <span class="role-pill">${roleFullName(p.role)}</span>
+    </div>
+    <div class="player-narrative">${p.narrative}</div>
+  </div>`;
+}
+function narrativeCallout(p) {
+  return ''; // narrative is in the header already
+}
+function roleFullName(role) {
+  if (role==='OH') return 'Outside Hitter';
+  if (role==='MB') return 'Middle Blocker';
+  if (role==='S')  return 'Setter';
+  if (role==='L/DS') return 'Libero / Defensive Specialist';
+  return role;
+}
+
+function renderHitterCharts(p) {
+  // Hitting chart
+  const hitLabels = TOURNEY_LABELS.map((l,i) => p.sets[i] === null ? l + ' (DNP)' : l);
+  const atkData = p.atkPct.map((v,i) => p.sets[i] === null ? null : v);
+  const kpsData = p.KperS ? p.KperS.map((v,i) => p.sets[i] === null ? null : (normalizePerSet ? v : v)) : null;
+  makeChart(`ch_${p.tabId}_hit`, {
+    type:'line',
+    data:{labels:hitLabels, datasets:[
+      {label:'Attack%',data:atkData,borderColor:'#1a3a6b',backgroundColor:'rgba(26,58,107,0.06)',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:5,pointHoverRadius:7,
+        pointBackgroundColor: atkData.map(v => v===null?'transparent': v>=0.200?'#2e7d32':v>=0.050?'#f9a825':'#c62828'),
+        pointBorderColor: '#fff', pointBorderWidth:1.5},
+      ...(kpsData ? [{label:'K/Set',data:kpsData,borderColor:'#e8a020',backgroundColor:'rgba(232,160,32,0.06)',borderWidth:2,tension:0.3,yAxisID:'y2',pointRadius:4,borderDash:[4,3]}] : []),
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}},
+        tooltip:{callbacks:{
+          afterLabel: (ctx) => {
+            const i = ctx.dataIndex;
+            if (p.K && p.K[i] !== null) return `  K:${p.K[i]} E:${p.E[i]} TA:${p.TA[i]}`;
+            return '';
+          }
+        }},
+        annotation: {annotations: buildBreakoutAnnotations(p.atkPct)}
+      },
+      scales:{
+        x:{ticks:{font:{size:10}}, grid:{color:'rgba(0,0,0,0.04)'}},
+        y1:{type:'linear',position:'left',title:{display:true,text:'Attack%',font:{size:10}},
+          ticks:{font:{size:10}},
+          grid:{color:'rgba(0,0,0,0.05)'}},
+        y2:{type:'linear',position:'right',title:{display:true,text:'K/Set',font:{size:10}},display:!!kpsData,grid:{display:false},ticks:{font:{size:10}}},
+      }
+    }
+  });
+
+  // Serving chart
+  const srvData = p.srvEff.map((v,i) => p.sets[i] === null ? null : v);
+  const srvPctData = p.srvPct.map((v,i) => p.sets[i] === null ? null : v);
+  const saData = p.SA.map((v,i) => {
+    if (p.sets[i] === null || v === null) return null;
+    return normalizePerSet ? v/SETS[i] : v;
+  });
+  makeChart(`ch_${p.tabId}_srv`, {
+    type:'line',
+    data:{labels:hitLabels, datasets:[
+      {label:'Serve Eff',data:srvData,borderColor:'#e8a020',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:4,
+        pointBackgroundColor:srvData.map(v=>v===null?'transparent':v>=0.150?'#2e7d32':v>=0.050?'#f9a825':'#c62828'),
+        pointBorderColor:'#fff',pointBorderWidth:1.5},
+      {label:'Serve Pct',data:srvPctData,borderColor:'#7b1fa2',borderWidth:1.5,tension:0.3,yAxisID:'y2',pointRadius:3,borderDash:[3,3]},
+      {label:'Aces'+(normalizePerSet?'/Set':''),data:saData,type:'bar',backgroundColor:'rgba(46,125,50,0.4)',yAxisID:normalizePerSet?'y1':'y3',order:10},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}},
+        tooltip:{callbacks:{
+          afterLabel:(ctx)=>{
+            const i=ctx.dataIndex;
+            if (ctx.dataset.label==='Serve Eff' && p.SA[i]!==null) return `  SA:${p.SA[i]} SE:${p.SE[i]} STA:${p.sTA[i]}`;
+            return '';
+          }
+        }}
+      },
+      scales:{
+        x:{ticks:{font:{size:10}},grid:{color:'rgba(0,0,0,0.04)'}},
+        y1:{type:'linear',position:'left',title:{display:true,text:'Efficiency',font:{size:10}},ticks:{font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}},
+        y2:{type:'linear',position:'right',title:{display:true,text:'Srv Pct',font:{size:10}},ticks:{font:{size:10}},grid:{display:false},min:0.5,max:1.1},
+        y3:{type:'linear',position:'right',display:false,grid:{display:false}},
+      }
+    }
+  });
+
+  // Passing chart if applicable
+  if (hasPassData(p)) {
+    const passRtgData = p.passRtg.map((v,i) => p.sets[i] === null ? null : v);
+    const r3pct = [], r2pct = [], r1pct = [], r0pct = [];
+    for (let i=0; i<8; i++) {
+      if (p.sets[i] === null || !p.RTA[i]) { r3pct.push(null); r2pct.push(null); r1pct.push(null); r0pct.push(null); continue; }
+      const tot = p.RTA[i];
+      r3pct.push(tot>0?((p.R3[i]||0)/tot*100):null);
+      r2pct.push(tot>0?((p.R2[i]||0)/tot*100):null);
+      r1pct.push(tot>0?((p.R1[i]||0)/tot*100):null);
+      r0pct.push(tot>0?((p.R0[i]||0)/tot*100):null);
+    }
+    makeChart(`ch_${p.tabId}_pass`, {
+      type:'bar',
+      data:{labels:hitLabels, datasets:[
+        {label:'R3 (Perfect)',data:r3pct,backgroundColor:'#1b5e20',stack:'pass'},
+        {label:'R2 (Good)',data:r2pct,backgroundColor:'#4caf50',stack:'pass'},
+        {label:'R1 (Poor)',data:r1pct,backgroundColor:'#ffeb3b',stack:'pass'},
+        {label:'R0 (Missed)',data:r0pct,backgroundColor:'#c62828',stack:'pass'},
+        {label:'Pass Rating',data:passRtgData,type:'line',borderColor:'#1a3a6b',borderWidth:2.5,pointRadius:4,yAxisID:'y2',tension:0.3,order:-1,fill:false,
+          pointBackgroundColor:passRtgData.map(v=>v===null?'transparent':v>=1.4?'#2e7d32':v>=1.2?'#f9a825':'#c62828'),
+          pointBorderColor:'#fff',pointBorderWidth:1.5},
+      ]},
+      options:{
+        responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+        plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+        scales:{
+          x:{stacked:true,ticks:{font:{size:10}}},
+          y:{stacked:true,title:{display:true,text:'% of Receives',font:{size:10}},ticks:{font:{size:10},callback:v=>v+'%'},max:100,min:0},
+          y2:{type:'linear',position:'right',title:{display:true,text:'Pass Rating',font:{size:10}},ticks:{font:{size:10}},grid:{display:false},min:0,max:3},
+        }
+      }
+    });
+  }
+}
+
+function buildBreakoutAnnotations(atkPct) { return {}; } // placeholder — annotation plugin not loaded
+
+function hitterTableHTML(p) {
+  const nonNullAtk = p.atkPct.filter(v=>v!==null);
+  const bestAtk = nonNullAtk.length ? Math.max(...nonNullAtk) : null;
+  const worstAtk = nonNullAtk.length ? Math.min(...nonNullAtk) : null;
+  const seasonAvg = avgNonNull(p.atkPct);
+
+  let html = `<table><thead><tr>
+    <th>Tournament</th><th>Sets</th><th>K</th><th>E</th><th>TA</th><th>Atk%</th><th>K/Set</th>
+    <th>SA</th><th>SE</th><th>Srv%</th><th>Srv Eff</th>
+    <th>R3</th><th>R2</th><th>R1</th><th>R0</th><th>RTA</th><th>Pass Rtg</th>
+  </tr></thead><tbody>`;
+  TOURNAMENTS.forEach((t,i) => {
+    if (p.sets[i] === null) {
+      html += `<tr><td><strong>${t}</strong></td><td colspan="16" class="td-dnp">Did Not Play</td></tr>`;
+      return;
+    }
+    const atk = p.atkPct[i];
+    const isBest = atk !== null && atk === bestAtk;
+    const isWorst = atk !== null && atk === worstAtk;
+    const atkClass = colorAtk(atk) + (isBest?' td-best':isWorst?' td-worst':'');
+    const prev = i>0 ? p.atkPct.slice(0,i).filter(v=>v!==null).pop() : null;
+    const arr = trendArrow(atk, prev);
+    const isBreakout = seasonAvg !== null && atk !== null && (atk - seasonAvg) > 0.05;
+    html += `<tr>
+      <td><strong>${t}</strong><br><span style="font-size:.68rem;color:#aaa">${TOURNEY_DATES[i]}</span></td>
+      <td>${p.sets[i]}</td>
+      <td>${p.K ? (p.K[i]??'—') : '—'}</td>
+      <td>${p.E ? (p.E[i]??'—') : '—'}</td>
+      <td>${p.TA ? (p.TA[i]??'—') : '—'}</td>
+      <td class="${atkClass}">${fmt(atk,3)} <span class="${arr.cls}">${arr.sym}</span>${isBreakout?' ⭐':''}</td>
+      <td>${p.KperS ? fmt(p.KperS[i],2) : '—'}</td>
+      <td>${p.SA[i]??'—'}</td><td>${p.SE[i]??'—'}</td>
+      <td class="${colorSrvPct(p.srvPct[i])}">${fmt(p.srvPct[i],3)}</td>
+      <td class="${colorSrvEff(p.srvEff[i])}">${fmt(p.srvEff[i],3)}</td>
+      <td>${p.R3[i]??'—'}</td><td>${p.R2[i]??'—'}</td><td>${p.R1[i]??'—'}</td><td>${p.R0[i]??'—'}</td><td>${p.RTA[i]??'—'}</td>
+      <td class="${colorPass(p.passRtg[i])}">${fmt(p.passRtg[i],3)}</td>
+    </tr>`;
+  });
+  html += `<tr style="background:#f0f4ff;font-weight:700">
+    <td>Season Avg</td>
+    <td>${fmt(avgNonNull(p.sets),1)}</td>
+    <td>${p.K?fmt(avgNonNull(p.K),1):'—'}</td>
+    <td>${p.E?fmt(avgNonNull(p.E),1):'—'}</td>
+    <td>${p.TA?fmt(avgNonNull(p.TA),1):'—'}</td>
+    <td class="${colorAtk(seasonAvg)}">${fmt(seasonAvg,3)}</td>
+    <td>${p.KperS?fmt(avgNonNull(p.KperS),2):'—'}</td>
+    <td>${fmt(avgNonNull(p.SA),1)}</td><td>${fmt(avgNonNull(p.SE),1)}</td>
+    <td class="${colorSrvPct(avgNonNull(p.srvPct))}">${fmt(avgNonNull(p.srvPct),3)}</td>
+    <td class="${colorSrvEff(avgNonNull(p.srvEff))}">${fmt(avgNonNull(p.srvEff),3)}</td>
+    <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+    <td class="${colorPass(avgNonNull(p.passRtg))}">${fmt(avgNonNull(p.passRtg),3)}</td>
+  </tr>`;
+  html += `</tbody></table>`;
+  return html;
+}
+
+// ============================================================
+// SETTER TAB
+// ============================================================
+function renderSetterTab(p) {
+  const el = document.getElementById(p.tabId);
+  if (!el) return;
+  el.innerHTML = `
+    ${playerHeaderHTML(p)}
+    <div class="two-col">
+      <div class="chart-card">
+        <h3>Setting Volume & Quality</h3>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_set"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Serving Trend</h3>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_srv"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3>Setting Distribution (Set Quality %)</h3>
+      <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_sdist"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>Tournament Stats Table</h3>
+      <div class="stats-table-wrap">${setterTableHTML(p)}</div>
+    </div>
+  `;
+  renderSetterCharts(p);
+}
+
+function renderSetterCharts(p) {
+  const labels = TOURNEY_LABELS;
+  const astData = p.astPerS.map((v,i) => p.sets[i] === null ? null : (normalizePerSet ? v : p.ast[i]));
+  const setSEpS  = p.setSE.map((v,i) => p.sets[i] === null ? null : (normalizePerSet ? v/SETS[i] : v));
+
+  makeChart(`ch_${p.tabId}_set`, {
+    type:'line',
+    data:{labels, datasets:[
+      {label:'Ast'+(normalizePerSet?'/Set':''),data:astData,borderColor:'#1a3a6b',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:4,
+        pointBackgroundColor:'#1a3a6b',fill:false},
+      {label:'Set Errors'+(normalizePerSet?'/Set':''),data:setSEpS,borderColor:'#c62828',borderWidth:2,tension:0.3,yAxisID:'y1',pointRadius:3,borderDash:[4,3]},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+      scales:{
+        x:{ticks:{font:{size:10}}},
+        y1:{title:{display:true,text:normalizePerSet?'Per Set':'Total',font:{size:10}},ticks:{font:{size:10}}}
+      }
+    }
+  });
+
+  // Serving
+  const srvData = p.srvEff.map((v,i) => p.sets[i] === null ? null : v);
+  const srvPctData = p.srvPct.map((v,i) => p.sets[i] === null ? null : v);
+  const saData = p.SA.map((v,i) => {
+    if (p.sets[i] === null || v === null) return null;
+    return normalizePerSet ? v/SETS[i] : v;
+  });
+  makeChart(`ch_${p.tabId}_srv`, {
+    type:'line',
+    data:{labels, datasets:[
+      {label:'Serve Eff',data:srvData,borderColor:'#e8a020',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:4,
+        pointBackgroundColor:srvData.map(v=>v===null?'transparent':v>=0.150?'#2e7d32':v>=0.050?'#f9a825':'#c62828'),
+        pointBorderColor:'#fff',pointBorderWidth:1.5},
+      {label:'Serve Pct',data:srvPctData,borderColor:'#7b1fa2',borderWidth:1.5,tension:0.3,yAxisID:'y2',pointRadius:3,borderDash:[3,3]},
+      {label:'Aces'+(normalizePerSet?'/Set':''),data:saData,type:'bar',backgroundColor:'rgba(46,125,50,0.4)',yAxisID:'y1',order:10},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+      scales:{
+        x:{ticks:{font:{size:10}}},
+        y1:{position:'left',title:{display:true,text:'Efficiency',font:{size:10}},ticks:{font:{size:10}}},
+        y2:{position:'right',min:0.4,max:1.1,title:{display:true,text:'Srv Pct',font:{size:10}},ticks:{font:{size:10}},grid:{display:false}},
+      }
+    }
+  });
+
+  // Setting distribution stacked
+  const s3pct=[], s2pct=[], s1pct=[], s0pct=[];
+  for (let i=0; i<8; i++) {
+    if (p.sets[i]===null||!p.setTA[i]) { s3pct.push(null);s2pct.push(null);s1pct.push(null);s0pct.push(null);continue; }
+    const tot=p.setTA[i];
+    s3pct.push((p.set3[i]||0)/tot*100);
+    s2pct.push((p.set2[i]||0)/tot*100);
+    s1pct.push((p.set1[i]||0)/tot*100);
+    s0pct.push((p.set0[i]||0)/tot*100);
+  }
+  makeChart(`ch_${p.tabId}_sdist`, {
+    type:'bar',
+    data:{labels, datasets:[
+      {label:'Set 3 (Excellent)',data:s3pct,backgroundColor:'#1b5e20',stack:'s'},
+      {label:'Set 2 (Good)',data:s2pct,backgroundColor:'#4caf50',stack:'s'},
+      {label:'Set 1 (Poor)',data:s1pct,backgroundColor:'#ffeb3b',stack:'s'},
+      {label:'Set 0 (Error)',data:s0pct,backgroundColor:'#c62828',stack:'s'},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+      scales:{
+        x:{stacked:true,ticks:{font:{size:10}}},
+        y:{stacked:true,title:{display:true,text:'% of Set Attempts',font:{size:10}},ticks:{callback:v=>v+'%',font:{size:10}},max:100,min:0}
+      }
+    }
+  });
+}
+
+function setterTableHTML(p) {
+  let html = `<table><thead><tr>
+    <th>Tournament</th><th>Sets</th><th>Ast</th><th>Set TA</th><th>Ast/Set</th><th>Set Errs</th>
+    <th>SA</th><th>SE</th><th>Srv%</th><th>Srv Eff</th>
+  </tr></thead><tbody>`;
+  TOURNAMENTS.forEach((t,i) => {
+    if (p.sets[i] === null) {
+      html += `<tr><td><strong>${t}</strong></td><td colspan="9" class="td-dnp">Did Not Play</td></tr>`; return;
+    }
+    const astPS = p.astPerS[i];
+    const prev = i>0 ? p.astPerS.slice(0,i).filter(v=>v!==null).pop() : null;
+    const arr = trendArrow(astPS, prev, 0.3);
+    html += `<tr>
+      <td><strong>${t}</strong><br><span style="font-size:.68rem;color:#aaa">${TOURNEY_DATES[i]}</span></td>
+      <td>${p.sets[i]}</td>
+      <td>${p.ast[i]??'—'}</td><td>${p.setTA[i]??'—'}</td>
+      <td>${fmt(astPS,2)} <span class="${arr.cls}">${arr.sym}</span></td>
+      <td>${p.setSE[i]??'—'}</td>
+      <td>${p.SA[i]??'—'}</td><td>${p.SE[i]??'—'}</td>
+      <td class="${colorSrvPct(p.srvPct[i])}">${fmt(p.srvPct[i],3)}</td>
+      <td class="${colorSrvEff(p.srvEff[i])}">${fmt(p.srvEff[i],3)}</td>
+    </tr>`;
+  });
+  html += `<tr style="background:#f0f4ff;font-weight:700">
+    <td>Season Avg</td><td>${fmt(avgNonNull(p.sets),1)}</td>
+    <td>${fmt(avgNonNull(p.ast),1)}</td><td>${fmt(avgNonNull(p.setTA),1)}</td>
+    <td>${fmt(avgNonNull(p.astPerS),2)}</td><td>${fmt(avgNonNull(p.setSE),1)}</td>
+    <td>${fmt(avgNonNull(p.SA),1)}</td><td>${fmt(avgNonNull(p.SE),1)}</td>
+    <td class="${colorSrvPct(avgNonNull(p.srvPct))}">${fmt(avgNonNull(p.srvPct),3)}</td>
+    <td class="${colorSrvEff(avgNonNull(p.srvEff))}">${fmt(avgNonNull(p.srvEff),3)}</td>
+  </tr></tbody></table>`;
+  return html;
+}
+
+// ============================================================
+// DS / LIBERO TAB
+// ============================================================
+function renderDSTab(p) {
+  const el = document.getElementById(p.tabId);
+  if (!el) return;
+  const hasDigs = !!p.digs;
+  const hasSrv  = p.SA && p.SA.some(v=>v!==null&&v>0);
+  const hasAtk  = p.atkPct && p.atkPct.some(v=>v!==null&&Math.abs(v)>0.001);
+  el.innerHTML = `
+    ${playerHeaderHTML(p)}
+    <div class="${hasDigs?'two-col':'chart-card-solo'}">
+      <div class="chart-card">
+        <h3>Passing Breakdown</h3>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_pass"></canvas></div>
+      </div>
+      ${hasDigs ? `<div class="chart-card">
+        <h3>Dig Volume</h3>
+        <div class="chart-wrap" style="height:220px"><canvas id="ch_${p.tabId}_dig"></canvas></div>
+      </div>` : ''}
+    </div>
+    ${hasSrv ? `<div class="chart-card">
+      <h3>Serving Trend</h3>
+      <div class="chart-wrap" style="height:200px"><canvas id="ch_${p.tabId}_srv"></canvas></div>
+    </div>` : ''}
+    ${hasAtk ? `<div class="chart-card">
+      <h3>Attack Contribution</h3>
+      <div class="chart-wrap" style="height:180px"><canvas id="ch_${p.tabId}_atk"></canvas></div>
+    </div>` : ''}
+    <div class="chart-card">
+      <h3>Tournament Stats Table</h3>
+      <div class="stats-table-wrap">${dsTableHTML(p)}</div>
+    </div>
+  `;
+  renderDSCharts(p);
+}
+
+function renderDSCharts(p) {
+  const labels = TOURNEY_LABELS;
+  // Passing chart
+  const passRtgData = p.passRtg.map((v,i) => p.sets[i] === null ? null : v);
+  const r3pct=[], r2pct=[], r1pct=[], r0pct=[];
+  for (let i=0; i<8; i++) {
+    if (p.sets[i]===null||!p.RTA[i]) { r3pct.push(null);r2pct.push(null);r1pct.push(null);r0pct.push(null);continue; }
+    const tot=p.RTA[i];
+    r3pct.push((p.R3[i]||0)/tot*100);
+    r2pct.push((p.R2[i]||0)/tot*100);
+    r1pct.push((p.R1[i]||0)/tot*100);
+    r0pct.push((p.R0[i]||0)/tot*100);
+  }
+  makeChart(`ch_${p.tabId}_pass`, {
+    type:'bar',
+    data:{labels, datasets:[
+      {label:'R3 (Perfect)',data:r3pct,backgroundColor:'#1b5e20',stack:'pass'},
+      {label:'R2 (Good)',data:r2pct,backgroundColor:'#4caf50',stack:'pass'},
+      {label:'R1 (Poor)',data:r1pct,backgroundColor:'#ffeb3b',stack:'pass'},
+      {label:'R0 (Missed)',data:r0pct,backgroundColor:'#c62828',stack:'pass'},
+      {label:'Pass Rating',data:passRtgData,type:'line',borderColor:'#1a3a6b',borderWidth:2.5,pointRadius:4,yAxisID:'y2',tension:0.3,order:-1,fill:false,
+        pointBackgroundColor:passRtgData.map(v=>v===null?'transparent':v>=1.4?'#2e7d32':v>=1.2?'#f9a825':'#c62828'),
+        pointBorderColor:'#fff',pointBorderWidth:1.5},
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+      scales:{
+        x:{stacked:true,ticks:{font:{size:10}}},
+        y:{stacked:true,title:{display:true,text:'% of Receives',font:{size:10}},ticks:{callback:v=>v+'%',font:{size:10}},max:100,min:0},
+        y2:{type:'linear',position:'right',title:{display:true,text:'Pass Rating',font:{size:10}},ticks:{font:{size:10}},grid:{display:false},min:0,max:3}
+      }
+    }
+  });
+
+  // Dig chart
+  if (p.digs) {
+    const digData = p.digs.map((v,i) => p.sets[i]===null?null : (normalizePerSet ? v/SETS[i] : v));
+    makeChart(`ch_${p.tabId}_dig`, {
+      type:'bar',
+      data:{labels, datasets:[{label:'Digs'+(normalizePerSet?'/Set':''),data:digData,backgroundColor:'rgba(26,58,107,0.65)',borderRadius:3}]},
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false}},
+        scales:{
+          x:{ticks:{font:{size:10}}},
+          y:{title:{display:true,text:normalizePerSet?'Digs/Set':'Total Digs',font:{size:10}},ticks:{font:{size:10}}}
+        }
+      }
+    });
+  }
+
+  // Serving chart
+  if (p.SA && p.SA.some(v=>v!==null&&v>0)) {
+    const srvData = p.srvEff.map((v,i) => p.sets[i]===null?null:v);
+    const srvPctData = p.srvPct.map((v,i) => p.sets[i]===null?null:v);
+    const saData = p.SA.map((v,i) => {
+      if (p.sets[i]===null||v===null) return null;
+      return normalizePerSet ? v/SETS[i] : v;
+    });
+    makeChart(`ch_${p.tabId}_srv`, {
+      type:'line',
+      data:{labels, datasets:[
+        {label:'Serve Eff',data:srvData,borderColor:'#e8a020',borderWidth:2.5,tension:0.3,yAxisID:'y1',pointRadius:4,
+          pointBackgroundColor:srvData.map(v=>v===null?'transparent':v>=0.150?'#2e7d32':v>=0.050?'#f9a825':'#c62828'),
+          pointBorderColor:'#fff',pointBorderWidth:1.5},
+        {label:'Serve Pct',data:srvPctData,borderColor:'#7b1fa2',borderWidth:1.5,tension:0.3,yAxisID:'y2',pointRadius:3,borderDash:[3,3]},
+        {label:'Aces'+(normalizePerSet?'/Set':''),data:saData,type:'bar',backgroundColor:'rgba(46,125,50,0.4)',yAxisID:'y1',order:10},
+      ]},
+      options:{
+        responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},
+        scales:{
+          x:{ticks:{font:{size:10}}},
+          y1:{position:'left',title:{display:true,text:'Efficiency',font:{size:10}},ticks:{font:{size:10}}},
+          y2:{position:'right',min:0.3,max:1.1,title:{display:true,text:'Srv Pct',font:{size:10}},ticks:{font:{size:10}},grid:{display:false}},
+        }
+      }
+    });
+  }
+
+  // Attack chart (for DS players who hit occasionally)
+  if (p.atkPct && p.atkPct.some(v=>v!==null&&Math.abs(v)>0.001)) {
+    const atkData = p.atkPct.map((v,i) => p.sets[i]===null?null:v);
+    makeChart(`ch_${p.tabId}_atk`, {
+      type:'bar',
+      data:{labels, datasets:[{
+        label:'Attack%', data:atkData,
+        backgroundColor: atkData.map(v=>v===null?'transparent':v>=0.200?'rgba(46,125,50,0.7)':v>=0.050?'rgba(249,168,37,0.7)':'rgba(198,40,40,0.6)'),
+        borderRadius:3
+      }]},
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false}},
+        scales:{x:{ticks:{font:{size:10}}},y:{title:{display:true,text:'Attack%',font:{size:10}},ticks:{font:{size:10}}}}
+      }
+    });
+  }
+}
+
+function dsTableHTML(p) {
+  const nonNullPass = p.passRtg.filter(v=>v!==null);
+  const bestPass = nonNullPass.length ? Math.max(...nonNullPass) : null;
+  const worstPass = nonNullPass.length ? Math.min(...nonNullPass) : null;
+
+  let html = `<table><thead><tr>
+    <th>Tournament</th><th>Sets</th>
+    <th>SA</th><th>SE</th><th>Srv%</th><th>Srv Eff</th>
+    <th>R3</th><th>R2</th><th>R1</th><th>R0</th><th>RTA</th><th>Pass Rtg</th>
+    ${p.digs?'<th>Digs</th><th>Dig/Set</th>':''}
+    ${p.atkPct&&p.atkPct.some(v=>v!==null&&Math.abs(v)>0.001)?'<th>Atk%</th>':''}
+  </tr></thead><tbody>`;
+  TOURNAMENTS.forEach((t,i) => {
+    if (p.sets[i] === null) {
+      html += `<tr><td><strong>${t}</strong></td><td colspan="20" class="td-dnp">Did Not Play</td></tr>`; return;
+    }
+    const pass = p.passRtg[i];
+    const isBest  = pass !== null && pass === bestPass;
+    const isWorst = pass !== null && pass === worstPass;
+    const passClass = colorPass(pass) + (isBest?' td-best':isWorst?' td-worst':'');
+    const prev = i>0 ? p.passRtg.slice(0,i).filter(v=>v!==null).pop() : null;
+    const arr = trendArrow(pass, prev);
+    html += `<tr>
+      <td><strong>${t}</strong><br><span style="font-size:.68rem;color:#aaa">${TOURNEY_DATES[i]}</span></td>
+      <td>${p.sets[i]}</td>
+      <td>${p.SA[i]??'—'}</td><td>${p.SE[i]??'—'}</td>
+      <td class="${colorSrvPct(p.srvPct[i])}">${fmt(p.srvPct[i],3)}</td>
+      <td class="${colorSrvEff(p.srvEff[i])}">${fmt(p.srvEff[i],3)}</td>
+      <td>${p.R3[i]??'—'}</td><td>${p.R2[i]??'—'}</td><td>${p.R1[i]??'—'}</td><td>${p.R0[i]??'—'}</td><td>${p.RTA[i]??'—'}</td>
+      <td class="${passClass}">${fmt(pass,3)} <span class="${arr.cls}">${arr.sym}</span></td>
+      ${p.digs ? `<td>${p.digs[i]??'—'}</td><td>${p.digs[i]!==null&&p.digs[i]!==undefined ? fmt(p.digs[i]/SETS[i],2) : '—'}</td>` : ''}
+      ${p.atkPct&&p.atkPct.some(v=>v!==null&&Math.abs(v)>0.001) ? `<td class="${colorAtk(p.atkPct[i])}">${fmt(p.atkPct[i],3)}</td>` : ''}
+    </tr>`;
+  });
+  html += `<tr style="background:#f0f4ff;font-weight:700">
+    <td>Season Avg</td><td>${fmt(avgNonNull(p.sets),1)}</td>
+    <td>${fmt(avgNonNull(p.SA),1)}</td><td>${fmt(avgNonNull(p.SE),1)}</td>
+    <td class="${colorSrvPct(avgNonNull(p.srvPct))}">${fmt(avgNonNull(p.srvPct),3)}</td>
+    <td class="${colorSrvEff(avgNonNull(p.srvEff))}">${fmt(avgNonNull(p.srvEff),3)}</td>
+    <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+    <td class="${colorPass(avgNonNull(p.passRtg))}">${fmt(avgNonNull(p.passRtg),3)}</td>
+    ${p.digs?`<td>${fmt(avgNonNull(p.digs),1)}</td><td>${fmt(avgNonNull(p.digs.map((v,i)=>v!==null?v/SETS[i]:null)),2)}</td>`:''}
+    ${p.atkPct&&p.atkPct.some(v=>v!==null&&Math.abs(v)>0.001)?`<td class="${colorAtk(avgNonNull(p.atkPct))}">${fmt(avgNonNull(p.atkPct),3)}</td>`:''}
+  </tr></tbody></table>`;
+  return html;
+}
+
+// ============================================================
+// INIT
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  renderTab('tab-team');
+});
+</script>
+</body>
+</html>
