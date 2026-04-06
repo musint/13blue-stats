@@ -1,0 +1,970 @@
+#!/usr/bin/env python3
+"""
+NCVA Power League Tracker
+Fetches live data from Google Sheets and USAV SharePoint,
+cross-references bids, and generates an interactive HTML dashboard.
+"""
+
+import re
+import io
+import sys
+import csv
+import tempfile
+import os
+import json
+import threading
+from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+try:
+    import requests
+except ImportError:
+    print("Installing requests...")
+    os.system(f"{sys.executable} -m pip install requests")
+    import requests
+
+try:
+    import openpyxl
+except ImportError:
+    print("Installing openpyxl...")
+    os.system(f"{sys.executable} -m pip install openpyxl")
+    import openpyxl
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────────────────────
+
+SHEET_ID = "1_Xog0a8Lqf6COYTfp0B8575teSsfQoy5"
+
+AGE_GROUPS = {
+    "11":    "239795665",
+    "12":    "539092209",
+    "13":    "476909113",
+    "14":    "2086291804",
+    "15":    "486749021",
+    "16":    "2061013532",
+    "17/18": "1333744874",
+}
+
+SHAREPOINT_FILES = [
+    {
+        "url": "https://usavolley.sharepoint.com/:x:/g/IQBVtV5lS9J6TpQDoXuti89uAcKBrSWbQUPJTtMtvBVJS2k?e=D5MudQ",
+        "unique_id": "655eb555-d24b-4e7a-9403-a17bad8bcf6e",
+        "sheets": [
+            "11 National", "11 American",
+            "12 National", "12 USA", "12 American",
+            "13 Open", "13 National", "13 USA", "13 Liberty", "13 American",
+        ],
+        "label": "11s-13s",
+    },
+    {
+        "url": "https://usavolley.sharepoint.com/:x:/g/IQCpQtJYjEWoRpSAIYkZnZDbAbko4A5DUvr67W5YWFTIr3g?e=1sTURt",
+        "unique_id": "58d242a9-458c-46a8-9480-2189199d90db",
+        "sheets": [
+            "14 Open", "14 National", "14 USA", "14 Liberty", "14 American", "14 Freedom",
+            "15 Open", "15 National", "15 USA", "15 Liberty", "15 American", "15 Freedom",
+            "16 Open", "16 National", "16 USA", "16 Liberty", "16 American", "16 Freedom",
+            "17 Open", "17 National", "17 USA", "17 Liberty", "17 American", "17 Freedom",
+        ],
+        "label": "14s-17s",
+    },
+]
+
+TEAM_CODE_RE = re.compile(r"^G\d{2}[A-Z]{3,6}\d[A-Z]{2}$")
+
+OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NorCal_Power_League_Dashboard.html")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA FETCHING — Google Sheets
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_age_group(age_label: str, gid: str, session: requests.Session) -> list[dict]:
+    """Download CSV for one age group and return list of team dicts.
+
+    CSV column layout (consistent across all age groups):
+      0: Division  1: Div Place  2: Overall Rank  3: (empty)  4: (div-rank?)
+      5: Team Name  6: Team Code  7+: per-tournament data  20: Total Points  21: Bid note
+    """
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
+    print(f"  Fetching {age_label} age group ...", end=" ", flush=True)
+    try:
+        resp = session.get(url, allow_redirects=True, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"FAILED ({e})")
+        return []
+
+    text = resp.content.decode("utf-8", errors="replace")
+    rows = list(csv.reader(io.StringIO(text)))
+
+    # Extract bid allocation from header rows (e.g., "2 National / 2 American / 2 Freedom")
+    bid_alloc = ""
+    for row in rows[:5]:
+        line = " ".join(c for c in row if c).strip()
+        m = re.search(r"(\d+\s+(?:National|Open)[\s/\d\w]*)", line, re.I)
+        if m:
+            bid_alloc = m.group(1).strip()
+            break
+
+    # Detect the code column index from the first matching data row
+    # (always index 6 in practice, but we confirm dynamically)
+    code_col = None
+    for row in rows:
+        for i, cell in enumerate(row):
+            if TEAM_CODE_RE.match(cell.strip()):
+                code_col = i
+                break
+        if code_col is not None:
+            break
+
+    if code_col is None:
+        print("found 0 teams (no team codes detected)")
+        return [], bid_alloc
+
+    # Derive fixed column positions relative to code column
+    # Based on confirmed CSV layout:
+    #   code_col = 6, team_name = 5, overall = 2, div_place = 1, division = 0
+    col_team_name = code_col - 1   # 5
+    col_overall   = code_col - 4   # 2
+    col_div_place = code_col - 5   # 1
+    col_division  = code_col - 6   # 0
+
+    # Total points: scan from code_col+1 to end for the last decimal number
+    # before any text field (it appears around index 20)
+    teams = []
+    for row in rows:
+        code = safe_get(row, code_col).strip()
+        if not TEAM_CODE_RE.match(code):
+            continue
+
+        team_name    = safe_get(row, col_team_name).strip()
+        overall_rank = safe_get(row, col_overall).strip()
+        div_place    = safe_get(row, col_div_place).strip()
+        division     = safe_get(row, col_division).strip()
+
+        if not team_name or not re.search(r"[A-Za-z]", team_name):
+            continue
+        if not re.match(r"^\d+$", overall_rank):
+            overall_rank = ""
+
+        # Total points: last decimal number in the row after the code column
+        total_pts = ""
+        bid_note = ""
+        for j in range(code_col + 1, len(row)):
+            val = row[j].strip()
+            if re.match(r"^\d+\.\d{2}$", val):
+                total_pts = val  # keep updating; the last one is the total
+            elif val and re.search(r"PNQ|bid|open|national|USA|liberty|american|freedom", val, re.I):
+                bid_note = val
+
+        # Strip trailing ".00" for cleaner display, keep decimals otherwise
+        if total_pts.endswith(".00"):
+            total_pts = total_pts[:-3]
+
+        teams.append({
+            "age": age_label,
+            "division": division,
+            "div_place": div_place,
+            "overall_rank": overall_rank,
+            "team_name": team_name,
+            "team_code": code,
+            "total_points": total_pts,
+            "bid_status": bid_note,
+            "bids": [],  # filled in during cross-reference
+        })
+
+    print(f"found {len(teams)} teams" + (f" | Bids: {bid_alloc}" if bid_alloc else ""))
+    return teams, bid_alloc
+
+
+def safe_get(lst, idx):
+    if 0 <= idx < len(lst):
+        return lst[idx]
+    return ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA FETCHING — SharePoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+def download_sharepoint_xlsx(file_cfg: dict, session: requests.Session) -> bytes | None:
+    """Fetch SharePoint sharing page, extract tempauth URL, download xlsx bytes."""
+    url = file_cfg["url"]
+    unique_id = file_cfg["unique_id"]
+    label = file_cfg["label"]
+    print(f"  Fetching SharePoint file ({label}) ...", end=" ", flush=True)
+
+    # Full browser-like headers required by SharePoint to avoid connection reset
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+    }
+
+    try:
+        resp = session.get(url, headers=headers, allow_redirects=True, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"FAILED (page fetch: {e})")
+        return None
+
+    html = resp.text
+    # The HTML contains JSON-encoded URLs where & is \u0026 — decode that
+    html_fixed = html.replace("\\u0026", "&").replace("\\u003d", "=")
+
+    download_url = None
+
+    # Strategy 1: look for download.aspx with tempauth token
+    m = re.search(
+        r'(https?://[^\s"\'<>\\]*download\.aspx[^\s"\'<>\\]*tempauth=[^\s"\'<>\\]+)',
+        html_fixed,
+    )
+    if m:
+        download_url = m.group(1).replace("&amp;", "&")
+
+    # Strategy 2: any URL containing the unique ID
+    if not download_url:
+        m = re.search(
+            r'(https?://[^\s"\'<>\\]*' + re.escape(unique_id) + r'[^\s"\'<>\\]*)',
+            html_fixed,
+            re.I,
+        )
+        if m:
+            download_url = m.group(1).replace("&amp;", "&")
+
+    if not download_url:
+        # Strategy 3: direct download via sharing token append ?download=1
+        print("no tempauth found, trying direct download ...")
+        direct = build_direct_download_url(url, unique_id, session, headers)
+        if direct:
+            return direct
+        print(f"  FAILED (could not extract download URL for {label})")
+        return None
+    try:
+        dl_resp = session.get(download_url, headers=headers, allow_redirects=True, timeout=60)
+        dl_resp.raise_for_status()
+        content = dl_resp.content
+        # Validate it's actually an xlsx
+        if content[:4] == b"PK\x03\x04":
+            print(f"downloaded {len(content):,} bytes")
+            return content
+        else:
+            print(f"FAILED (not a valid xlsx, got: {content[:50]})")
+            return None
+    except Exception as e:
+        print(f"FAILED (download: {e})")
+        return None
+
+
+def build_direct_download_url(sharing_url: str, unique_id: str, session: requests.Session, headers: dict) -> bytes | None:
+    """Fallback: try to build a direct download URL from the sharing token."""
+    # Extract the sharing token from the URL
+    # Format: https://usavolley.sharepoint.com/:x:/g/IQ<token>
+    m = re.search(r"sharepoint\.com/:[^/]+/g/([^?&]+)", sharing_url)
+    if not m:
+        return None
+
+    token = m.group(1)
+    # Try the download endpoint
+    download_url = f"https://usavolley.sharepoint.com/:x:/g/{token}?download=1"
+    try:
+        resp = session.get(download_url, headers=headers, allow_redirects=True, timeout=60)
+        if resp.status_code == 200 and resp.content[:4] == b"PK\x03\x04":
+            print(f"direct download succeeded, {len(resp.content):,} bytes")
+            return resp.content
+    except Exception:
+        pass
+    return None
+
+
+def parse_bid_xlsx(xlsx_bytes: bytes, sheet_names: list[str]) -> dict[str, list[tuple]]:
+    """
+    Parse xlsx bytes, return dict: {team_code: [(age, bid_type, event_qualified), ...]}
+    """
+    bid_map = {}
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    except Exception as e:
+        print(f"  WARNING: Could not parse xlsx: {e}")
+        return bid_map
+
+    for sheet_name in sheet_names:
+        if sheet_name not in wb.sheetnames:
+            continue
+
+        # Parse "13 National" → age=13, bid_type=National
+        parts = sheet_name.strip().split(None, 1)
+        if len(parts) < 2:
+            continue
+        age_str, bid_type = parts[0], parts[1]
+
+        ws = wb[sheet_name]
+        rows = list(ws.iter_rows(values_only=True))
+
+        for row in rows[3:]:  # Skip first 3 header rows
+            if not row or len(row) < 4:
+                continue
+            # Column D (index 3) = team code
+            code_val = row[3]
+            if code_val is None:
+                continue
+            code = str(code_val).strip()
+            if not TEAM_CODE_RE.match(code):
+                continue
+
+            # Column E (index 4) = region, Column F (index 5) = event qualified
+            region = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+            event_q = str(row[5]).strip() if len(row) > 5 and row[5] else ""
+
+            entry = (age_str, bid_type, event_q)
+            if code not in bid_map:
+                bid_map[code] = []
+            bid_map[code].append(entry)
+
+    wb.close()
+    return bid_map
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CROSS-REFERENCE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def cross_reference(all_teams: list[dict], bid_map: dict[str, list[tuple]]) -> list[dict]:
+    """Attach bid info to each team."""
+    for team in all_teams:
+        code = team["team_code"]
+        if code in bid_map:
+            team["bids"] = bid_map[code]
+        else:
+            team["bids"] = []
+    return all_teams
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTML GENERATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+BID_COLORS = {
+    "Open":     ("#FFD700", "#7a6000"),   # gold bg, dark text
+    "National": ("#1a56db", "#e8f0fe"),   # blue bg, light text
+    "USA":      ("#c81e1e", "#fff0f0"),   # red bg, near-white text
+    "Liberty":  ("#057a55", "#e6f7ee"),   # green bg
+    "American": ("#6b7280", "#f3f4f6"),   # silver/gray bg
+    "Freedom":  ("#7e3af2", "#f5f3ff"),   # purple bg
+}
+
+
+def bid_badge_html(bids: list[tuple]) -> str:
+    if not bids:
+        return ""
+    parts = []
+    for (age, bid_type, event_q) in bids:
+        bg, fg = BID_COLORS.get(bid_type, ("#374151", "#f9fafb"))
+        tooltip = f"{age} {bid_type}" + (f" — {event_q}" if event_q else "")
+        parts.append(
+            f'<span class="bid-badge" style="background:{bg};color:{fg}" title="{tooltip}">'
+            f"{bid_type}</span>"
+        )
+    return " ".join(parts)
+
+
+def generate_html(all_teams: list[dict], fetch_date: str, sharepoint_ok: bool, bid_allocs: dict = None) -> str:
+    if bid_allocs is None:
+        bid_allocs = {}
+    groups = list(AGE_GROUPS.keys())
+    tabs_html = []
+    panels_html = []
+
+    for i, age in enumerate(groups):
+        teams = [t for t in all_teams if t["age"] == age]
+        active_tab = "active" if i == 0 else ""
+        active_panel = "block" if i == 0 else "none"
+        tab_id = f"tab-{age.replace('/', '_')}"
+
+        tabs_html.append(
+            f'<button class="tab-btn {active_tab}" onclick="switchTab(\'{tab_id}\')" id="btn-{tab_id}">'
+            f"{age}s</button>"
+        )
+
+        bid_count = sum(1 for t in teams if t["bids"])
+
+        # Find NorCal VBC club teams (team name contains "NorCal")
+        norcal_club_teams = []
+        # Find teams with bids
+        nc_bid_teams = []
+        if teams:
+            sorted_teams = sorted(teams, key=lambda t: float(t["total_points"]) if t["total_points"] else 0, reverse=True)
+            for idx, t in enumerate(sorted_teams, 1):
+                if re.search(r'\bNorCal\b', t["team_name"], re.I):
+                    pts_str = f" ({t['total_points']} pts)" if t["total_points"] else ""
+                    bid_info = ""
+                    if t["bids"]:
+                        bid_info = " - " + "/".join(bt for _, bt, _ in t["bids"]) + " Bid"
+                    norcal_club_teams.append(f"#{idx} {t['team_name']}{pts_str}{bid_info}")
+                if t["bids"]:
+                    bid_types = "/".join(bt for _, bt, _ in t["bids"])
+                    nc_bid_teams.append(f"#{idx} {t['team_name']} ({bid_types})")
+
+        # NorCal club positions box
+        norcal_club_html = ""
+        if norcal_club_teams:
+            norcal_club_html = (
+                f'<div class="norcal-club-summary">'
+                f'<span class="norcal-club-label">NorCal VBC Positions:</span> '
+                + " &nbsp;|&nbsp; ".join(norcal_club_teams)
+                + "</div>"
+            )
+
+        # Bid holders box
+        bid_positions = ""
+        if nc_bid_teams:
+            bid_positions = (
+                f'<div class="nc-bids-summary">'
+                f'<span class="nc-bids-label">Teams with Bids:</span> '
+                + " &nbsp;|&nbsp; ".join(nc_bid_teams)
+                + "</div>"
+            )
+
+        # Region bid allocation
+        bid_alloc_html = ""
+        if age in bid_allocs:
+            bid_alloc_html = (
+                f'<span class="sep">•</span>'
+                f'<span class="stat alloc-stat">Region Bids: {bid_allocs[age]}</span>'
+            )
+
+        summary_html = (
+            f'<div class="summary">'
+            f'<span class="stat">{len(teams)} teams</span>'
+            f'<span class="sep">•</span>'
+            f'<span class="stat bid-stat">{bid_count} with bids</span>'
+            + bid_alloc_html
+            + "</div>"
+            + norcal_club_html
+            + bid_positions
+        )
+
+        rows_html = []
+        for rank_idx, t in enumerate(sorted(teams, key=lambda x: float(x["total_points"]) if x["total_points"] else 0, reverse=True), 1):
+            row_classes = []
+            if t["bids"]:
+                row_classes.append("has-bid")
+            if re.search(r'\bNorCal\b', t["team_name"], re.I):
+                row_classes.append("norcal-club")
+            bid_types = ", ".join(bt for _, bt, _ in t["bids"])
+            bid_events = "; ".join(ev for _, _, ev in t["bids"] if ev)
+            rows_html.append(
+                f'<tr class="{" ".join(row_classes)}">'
+                f'<td data-val="{rank_idx}">{rank_idx}</td>'
+                f'<td data-val="{t["division"]}">{t["division"]}</td>'
+                f'<td data-val="{t["team_name"]}">{t["team_name"]}</td>'
+                f'<td data-val="{t["team_code"]}" class="mono">{t["team_code"]}</td>'
+                f'<td data-val="{t["total_points"] or 0}" class="num">{t["total_points"]}</td>'
+                f'<td data-val="{bid_types}">{bid_badge_html(t["bids"])}</td>'
+                f'<td data-val="{bid_events}">{bid_events}</td>'
+                "</tr>"
+            )
+
+        table_html = f"""
+        <table class="data-table" id="tbl-{tab_id}">
+          <thead>
+            <tr>
+              <th onclick="sortTable('tbl-{tab_id}',0)" title="Sort">Rank <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',1)" title="Sort">Division <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',2)" title="Sort">Team Name <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',3)" title="Sort">Team Code <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',4)" title="Sort">Points <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',5)" title="Sort">Bid Type <span class="sort-icon">⇅</span></th>
+              <th onclick="sortTable('tbl-{tab_id}',6)" title="Sort">Qualifying Event <span class="sort-icon">⇅</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {"".join(rows_html) if rows_html else '<tr><td colspan="7" style="text-align:center;padding:2rem;color:#9ca3af;">No data available for this age group</td></tr>'}
+          </tbody>
+        </table>"""
+
+        panels_html.append(
+            f'<div class="tab-panel" id="{tab_id}" style="display:{active_panel}">'
+            + summary_html
+            + table_html
+            + "</div>"
+        )
+
+    sharepoint_warn = ""
+    if not sharepoint_ok:
+        sharepoint_warn = (
+            '<div class="warn-banner">'
+            "⚠️  Could not fetch USAV bid data from SharePoint. "
+            "Bid columns will be empty. NCVA Power League rankings are still shown."
+            "</div>"
+        )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NCVA Power League Rankings & Bid Tracker 2025-2026</title>
+<style>
+  :root {{
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #273549;
+    --border: #334155;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #4ade80;
+    --green-bg: #14532d;
+    --green-dim: #166534;
+    --radius: 8px;
+  }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }}
+  header {{
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 1.5rem 2rem;
+  }}
+  .header-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }}
+  header h1 {{
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }}
+  header p {{
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 0.3rem;
+  }}
+  .refresh-btn {{
+    background: var(--accent);
+    color: #0f172a;
+    border: none;
+    padding: 0.6rem 1.25rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+    transition: background 0.15s, transform 0.1s;
+  }}
+  .refresh-btn:hover {{ background: #7dd3fc; }}
+  .refresh-btn:active {{ transform: scale(0.97); }}
+  .refresh-btn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+  .refresh-icon {{ font-size: 1.1rem; display: inline-block; }}
+  .refresh-btn.spinning .refresh-icon {{
+    animation: spin 1s linear infinite;
+  }}
+  @keyframes spin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
+  .refresh-status {{
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+  }}
+  .refresh-status.error {{ color: #f87171; }}
+  .refresh-status.success {{ color: var(--green); }}
+  .norcal-club-summary {{
+    background: #1e1b4b;
+    border: 1px solid #4338ca;
+    border-radius: var(--radius);
+    padding: 0.6rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: #a5b4fc;
+    line-height: 1.6;
+  }}
+  .norcal-club-label {{
+    font-weight: 700;
+    color: #c7d2fe;
+  }}
+  .nc-bids-summary {{
+    background: var(--green-bg);
+    border: 1px solid var(--green-dim);
+    border-radius: var(--radius);
+    padding: 0.6rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--green);
+    line-height: 1.6;
+  }}
+  .nc-bids-label {{
+    font-weight: 700;
+    color: #86efac;
+  }}
+  .alloc-stat {{
+    color: #fbbf24 !important;
+    font-weight: 600;
+  }}
+  tr.norcal-club {{
+    background: #1e1b4b !important;
+    border-left: 3px solid #818cf8;
+  }}
+  tr.norcal-club td {{ color: #c7d2fe; }}
+  .warn-banner {{
+    background: #451a03;
+    border: 1px solid #92400e;
+    color: #fcd34d;
+    padding: 0.75rem 2rem;
+    font-size: 0.875rem;
+  }}
+  .tabs {{
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    display: flex;
+    gap: 0.25rem;
+    overflow-x: auto;
+  }}
+  .tab-btn {{
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 0.875rem 1.25rem;
+    cursor: pointer;
+    font-size: 0.925rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }}
+  .tab-btn:hover {{ color: var(--text); }}
+  .tab-btn.active {{ color: var(--accent); border-bottom-color: var(--accent); }}
+  .tab-panel {{ padding: 1.5rem 2rem; }}
+  .summary {{
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }}
+  .summary .stat {{
+    background: var(--surface2);
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.825rem;
+    color: var(--muted);
+  }}
+  .summary .bid-stat {{ color: var(--green); background: var(--green-bg); }}
+  .summary .sep {{ color: var(--border); }}
+  .data-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }}
+  .data-table thead {{
+    background: var(--surface2);
+  }}
+  .data-table th {{
+    padding: 0.7rem 0.9rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    font-size: 0.775rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }}
+  .data-table th:hover {{ color: var(--text); }}
+  .sort-icon {{ opacity: 0.4; font-size: 0.7rem; }}
+  .data-table td {{
+    padding: 0.6rem 0.9rem;
+    border-top: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+  }}
+  .data-table tbody tr {{ background: var(--surface); }}
+  .data-table tbody tr:nth-child(even) {{ background: var(--surface2); }}
+  .data-table tbody tr.has-bid {{ background: var(--green-bg) !important; }}
+  .data-table tbody tr.has-bid td {{ color: #bbf7d0; }}
+  .data-table tbody tr:hover td {{ background: rgba(56,189,248,0.06); }}
+  td.mono {{ font-family: "Consolas", "SF Mono", monospace; font-size: 0.8rem; color: var(--muted); }}
+  td.num {{ font-variant-numeric: tabular-nums; }}
+  .bid-badge {{
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: default;
+  }}
+  @media (max-width: 768px) {{
+    header {{ padding: 1rem; }}
+    .tab-panel {{ padding: 1rem; }}
+    .tabs {{ padding: 0 1rem; }}
+    .data-table {{ font-size: 0.8rem; }}
+    .data-table td, .data-table th {{ padding: 0.5rem; }}
+  }}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-row">
+    <div>
+      <h1>NCVA Girls Power League Rankings &amp; Bid Tracker 2025-2026</h1>
+      <p>Data fetched on <span id="fetch-date">{fetch_date}</span> &nbsp;•&nbsp; Sources: NCVA Google Sheets, USAV SharePoint bid lists</p>
+    </div>
+    <button id="refresh-btn" class="refresh-btn" onclick="refreshData()">
+      <span class="refresh-icon">&#x21bb;</span> Refresh Data
+    </button>
+  </div>
+</header>
+{sharepoint_warn}
+<nav class="tabs">
+  {"".join(tabs_html)}
+</nav>
+<main>
+  {"".join(panels_html)}
+</main>
+
+<script>
+function switchTab(id) {{
+  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).style.display = 'block';
+  document.getElementById('btn-' + id).classList.add('active');
+}}
+
+const sortState = {{}};
+function sortTable(tableId, colIdx) {{
+  const table = document.getElementById(tableId);
+  const tbody = table.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  const key = tableId + ':' + colIdx;
+  const asc = !sortState[key];
+  sortState[key] = asc;
+
+  rows.sort((a, b) => {{
+    const aCell = a.querySelectorAll('td')[colIdx];
+    const bCell = b.querySelectorAll('td')[colIdx];
+    if (!aCell || !bCell) return 0;
+    let aVal = aCell.getAttribute('data-val') || aCell.textContent.trim();
+    let bVal = bCell.getAttribute('data-val') || bCell.textContent.trim();
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum)) {{
+      return asc ? aNum - bNum : bNum - aNum;
+    }}
+    return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+  }});
+
+  rows.forEach(r => tbody.appendChild(r));
+
+  // Update sort icons
+  table.querySelectorAll('th .sort-icon').forEach((ic, i) => {{
+    ic.textContent = i === colIdx ? (asc ? '↑' : '↓') : '⇅';
+    ic.style.opacity = i === colIdx ? '1' : '0.4';
+  }});
+}}
+
+function refreshData() {{
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  btn.querySelector('.refresh-icon').textContent = '\\u21bb';
+  const oldText = btn.childNodes[btn.childNodes.length - 1];
+  oldText.textContent = ' Refreshing...';
+
+  fetch('http://localhost:8765/refresh')
+    .then(r => {{
+      if (!r.ok) throw new Error('Server returned ' + r.status);
+      return r.text();
+    }})
+    .then(() => {{
+      // Reload the page to show fresh data
+      window.location.reload();
+    }})
+    .catch(err => {{
+      btn.disabled = false;
+      btn.classList.remove('spinning');
+      oldText.textContent = ' Refresh Data';
+      alert('Refresh failed: ' + err.message + '\\n\\nMake sure the server is running:\\n  python power_league_tracker.py --serve');
+    }});
+}}
+</script>
+</body>
+</html>"""
+
+    return html
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+SERVE_PORT = 8765
+
+
+def fetch_and_generate():
+    """Fetch all data, cross-reference, and write the HTML dashboard. Returns summary string."""
+    print("=" * 60)
+    print("NCVA Power League Tracker")
+    print("=" * 60)
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+    })
+
+    # ── Step 1: Fetch Power League data ──────────────────────────────────────
+    print("\n[1/3] Fetching NCVA Power League data from Google Sheets...")
+    all_teams = []
+    bid_allocs = {}  # age_label -> bid allocation string
+    for age, gid in AGE_GROUPS.items():
+        teams, bid_alloc = fetch_age_group(age, gid, session)
+        all_teams.extend(teams)
+        if bid_alloc:
+            bid_allocs[age] = bid_alloc
+    print(f"  Total teams fetched: {len(all_teams)}")
+
+    # ── Step 2: Fetch SharePoint bid data ────────────────────────────────────
+    print("\n[2/3] Fetching USAV bid qualification data from SharePoint...")
+    bid_map = {}
+    sharepoint_ok = False
+
+    for file_cfg in SHAREPOINT_FILES:
+        # Use a fresh session per SharePoint file to avoid stale cookie/connection issues
+        sp_session = requests.Session()
+        sp_session.headers.update(session.headers)
+        xlsx_bytes = download_sharepoint_xlsx(file_cfg, sp_session)
+        if xlsx_bytes:
+            partial = parse_bid_xlsx(xlsx_bytes, file_cfg["sheets"])
+            bid_map.update(partial)
+            sharepoint_ok = True
+            print(f"  Parsed {len(partial)} bid-qualified teams from {file_cfg['label']}")
+        else:
+            print(f"  WARNING: Skipping bid data for {file_cfg['label']}")
+
+    print(f"  Total bid-qualified teams (all regions): {len(bid_map)}")
+    nc_bid_codes = {k for k in bid_map if k.endswith("NC")}
+    print(f"  NorCal (NC) bid-qualified teams: {len(nc_bid_codes)}")
+
+    # ── Step 3: Cross-reference ───────────────────────────────────────────────
+    print("\n[3/3] Cross-referencing team codes...")
+    all_teams = cross_reference(all_teams, bid_map)
+    bid_holders = [t for t in all_teams if t["bids"]]
+    print(f"  NCVA teams with bids: {len(bid_holders)}")
+    for t in bid_holders:
+        bid_str = ", ".join(f"{a} {b}" for a, b, _ in t["bids"])
+        print(f"    {t['team_code']:20s} {t['team_name']:35s} [{bid_str}]")
+
+    # ── Generate HTML ─────────────────────────────────────────────────────────
+    fetch_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+    html = generate_html(all_teams, fetch_date, sharepoint_ok, bid_allocs)
+
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    summary = f"{len(all_teams)} total teams | {len(bid_holders)} with bids"
+    print(f"\nDashboard written to: {OUTPUT_PATH}")
+    print(f"  {summary}")
+    return summary
+
+
+class RefreshHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/refresh":
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            try:
+                summary = fetch_and_generate()
+                self.wfile.write(json.dumps({"ok": True, "summary": summary}).encode())
+            except Exception as e:
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+        elif self.path == "/" or self.path == "/dashboard":
+            # Serve the dashboard HTML directly
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            with open(OUTPUT_PATH, "r", encoding="utf-8") as f:
+                self.wfile.write(f.read().encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        print(f"  [server] {args[0]}")
+
+
+def serve():
+    """Run as a local web server with a /refresh endpoint."""
+    if not os.path.exists(OUTPUT_PATH):
+        print("No existing dashboard found. Generating initial dashboard...")
+        fetch_and_generate()
+    else:
+        print(f"Using existing dashboard: {OUTPUT_PATH}")
+        print("Click 'Refresh Data' in the browser to fetch fresh data.")
+
+    server = HTTPServer(("127.0.0.1", SERVE_PORT), RefreshHandler)
+    print(f"\nServer running at http://localhost:{SERVE_PORT}")
+    print(f"  Dashboard: http://localhost:{SERVE_PORT}/dashboard")
+    print(f"  Refresh:   http://localhost:{SERVE_PORT}/refresh")
+    print(f"\nPress Ctrl+C to stop.\n")
+
+    import webbrowser
+    webbrowser.open(f"http://localhost:{SERVE_PORT}/dashboard")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+        server.server_close()
+
+
+def main():
+    if "--serve" in sys.argv:
+        serve()
+    else:
+        fetch_and_generate()
+        print("  Open the HTML file in a browser to view the dashboard.")
+        print(f"  Or run with --serve for live refresh: python power_league_tracker.py --serve")
+
+
+if __name__ == "__main__":
+    main()
